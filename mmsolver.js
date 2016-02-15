@@ -101,15 +101,33 @@
 		
 		this._data = {};
 		
+		this.dt = 1;
+		
 		if(initf !== undefined) {
 		// Конструирование полной сетки
-		    
+		
+		
+		// STUB for test only
+		    var c = [];
+			for(var i=0;i<this.dims;i++) {
+				c.push(0);
+				this._data["_n-"+i] = [];
+				this._data["_n"+i] = [];
+			}
+			for(var prm in this._movedParam) {
+				this._data[prm] = [];
+			}
+			var dd = initf(c);
+			for(var prm in this._calcPrm) {
+				this._data[prm][0] = dd[prm];
+			}			
 		}
 	}
-	Mesh.prototype._moveNewToOld = function() {		
+	Mesh.prototype._moveNewToOld = function() {	
+		var self = this;
 		this.foreach(0,function(d,i){
-			for(var prm in this._movedParam) {
-				if(d[prm+"_new"][i] !== undefined) {
+			for(var prm in self._movedParam) {
+				if((d[prm+"_new"]||[])[i] !== undefined) {
 					d[prm][i] = d[prm+"_new"][i];
 					delete d[prm+"_new"][i];
 				}
@@ -123,6 +141,8 @@
 		    f(this._data, i, this._data["_i"+(n%this.dims)][i]);
 	    }
 	    return i;*/
+		// STUB for test only
+		f(this._data, 0);
 	};
 	Mesh.prototype.deletePiont = function(i) {		
 		for(var p in this._data) {
@@ -141,6 +161,7 @@
 		this.mm = [new Mesh(d,h, initf)];
 		this.end = false;
 		var self = this;
+		this.kcr = 1/k/k;
 		this.stepers = 
 		{
 				FORWARD: function (){
@@ -152,34 +173,41 @@
 					    var d_new = {};
 					    var dfi = [];
 					    for(var j = 0; j < m.dims; j++) {
-    						var j_1 = d["_n-"+j][i]
+    						var j_1 = d["_n-"+j][i];
     						var j1 = d["_n"+j][i];
-    						j_1 = (j_1 === undefined?j:j_1);
-    						j1 = (j1 === undefined?j:j1);
-    						r = (j_1==j?0:1)+(j1==j?0:1);
-    						dfi[i] = (d._fi[j1]-d._fi[j_1])/(r*mesh._h);
+    						j_1 = (j_1 === undefined?i:j_1);
+    						j1 = (j1 === undefined?i:j1);
+    						var r = (j_1==j?0:1)+(j1==j?0:1);
+							if(r > 0) {
+								dfi[j] = (((d.fi||[])[j1]||0)-((d.fi||[])[j_1]||0))/(r*m._h);
+							} else {
+								dfi[j] = 0;
+							}
                         }
 						for(var prm in m._calcPrm) {							
 							d_new[prm] = 0;
 							for(var j = 0; j < m.dims; j++) {
-							    d_new[prm] += m.dt/m._h*(d["_F"+prm+"_"+j+"_1"][i] - d["_F"+prm+"_"+j+"_1"][i]);
+							    d_new[prm] += m.dt/m._h*((d["_F"+prm+"_"+j+"_1"]||[])[i]||0 - (d["_F"+prm+"_"+j+"_1"]||[])[i]||0);
 							    switch(prm[0]) {
 							    case "v":
-							        d_new[prm] -= dt*d["ro"][i]*dfi[i];
+							        d_new[prm] -= m.dt*d["ro"][i]*dfi[j];
 							        break;
 							    case "E":
-							        d_new[prm] -= dt*d["ro"][i]*d["v"+j][i]*dfi[i];
+							        d_new[prm] -= m.dt*d["ro"][i]*d["v"+j][i]*dfi[j];
 							        break;
 							    }
 							}
 						}
 						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Error("ro gone below zero!");	
 				        for (var k = 0 ; k < m.dims; k++) {
-					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][j] + d_new["ro"])) > 3e8) throw new Error("v"+i+" gone above light speed!");
-					        d["v"+k+"_new"][i] = (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][j] + d_new["ro"]);
+					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Error("v"+i+" gone above light speed!");
+							if(d["v"+k+"_new"] === undefined) d["v"+k+"_new"] = [];
+					        d["v"+k+"_new"][i] = (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]);
 				        }
 				        if((d["E"][j] + d_new["E"]) <= 0) throw new Error("E gone below zero!");
+						if(d["E_new"] === undefined) d["E_new"] = [];
 				        d["E_new"][i] = d["E"][i] + d_new["E"];
+						if(d["ro_new"] === undefined) d["ro_new"] = [];
 				        d["ro_new"][i] = d["ro"][i] + d_new["ro"];
 					});
 					// б. (new) Рассчёт g и f-критериев
@@ -195,11 +223,37 @@
 		                */
 		                var gm = 5/3;
 		                if((gm-1)*(d.E[i]-d.ro[i]*vv/2) < 0) throw new Error("p gone below zero!");
-		                d["p_new"][i] = (gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
-		                d["a_new"][i] = Math.sqrt(gm*d.p_new[i]/d.ro_new[i]);
+		                if(d["p"] === undefined) d["p"] = [];
+				        d["p"][i] = (gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
+		                if(d["a"] === undefined) d["a"] = [];
+				        d["a"][i] = Math.sqrt(gm*d.p[i]/d.ro_new[i]);
 					    
+						d["_fcr"][i] = m._h/Math.sqrt(Math.PI*d.a[i]*d.a[i]/6.67e-11/d.ro_new[i]);
+						
+						var fn_cr = -Infinity;
+						for(var prm in m._calcPrm) {
+							prm += "_new";
+							for(var j =0; j < m.dims; j++) {
+								var j_1 = d["_n-"+j][i]
+								var j1 = d["_n"+j][i];
+								j_1 = (j_1 === undefined?i:j_1);
+								j1 = (j1 === undefined?i:j1);
+								var fnx_i = d[prm][j_1]+d[prm][j1];
+								fn_cr = Math.max(fn_cr, (fnx_i==0)?Math.abs(d[prm][i]):Math.abs(2*d[prm][i]/(fnx_i)-1));
+							}
+						}
+						d["_gcr"][i] = fn_cr;
+						
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
+					m.foreach(0, function(d,i){
+						if(d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr) {
+							var isMonade = (d["_is_monade"]||[])[i];
+							if(!isMonade) {
+								m.isCriterialPoints = true;
+							}
+						}
+					})
 					// г. (new) Решение эллиптических уравнений (new)
 					// д. (new) Рассчёт потоков для гиберболических уравнений (new)
 					// е. Уменьшить счётчик шагов на 1
@@ -369,13 +423,14 @@
 	        d["v"+i] = 0;
 	        r2 += c[i]*c[i];
 	    }
-	    d.ro = 1e-21 + (0.01/(1+1e-14*r2*r2));
+	    d.ro = 1e-21 * (1.01/(1+1e-14*r2*r2));
 	    d.E = d.ro*10;
 	    return d;
 	});
-	mm._mesh().stepCounter = 1;
+	mm._mesh().stepCounter = 0;
 	do {
 		mm.doStep(mm.selectStep());
 		mm.drawStep([{canvas: null, prm: "ro"}]);					
 	} while(!mm.end);
+	console.log(mm);
 })();
