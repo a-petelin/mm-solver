@@ -46,33 +46,36 @@
 
 (function(){
 	var kk = 0.25;
-	function Mesh(d) {
+	function Mesh(d, h, initf) {
 		this.stepCounter = 0;
 		this.isCriterialPoints = false;
 		this.dims = d;
-		
+		this._h = h;		
+		var self = this;
+
 		this._movedParam = (function(){
-			var initP = {v:"", ro:"",E:"",_p:"",_fi:""};
+			var initP = {v:2, ro:1, E:1, p:0, fi:0, _fcr:0, _gcr:0};
 			var movedParam = {};
 			for(var prm in initP) {
 				var p = {};
 				p[prm] = "";
-				switch(prm[0]) {
-				case "v":
+				var val = initP[prm];
+				switch(val) {
+				case 2:
 					p = {};
-					for(var i = 0; i < this.dims; i++) {
+					for(var i = 0; i < self.dims; i++) {
 						movedParam[prm + i] = ""; 
 						p[prm + i] = ""; 
 					}
 					break;
-				case "_":
+				case 0:
 					p = {};
 				default:				
 					movedParam[prm] = ""; 
 					break;
 				}
 				for(var pp in p) {
-					for(var i = 0; i < this.dims; i++) {
+					for(var i = 0; i < self.dims; i++) {
 						movedParam["_F" + pp + "_" + i + "_1"] = "";
 						movedParam["_F" + pp + "_" + i + "_2"] = ""; 
 					}					
@@ -81,12 +84,30 @@
 			return movedParam;
 		})();
 		
-		this._calcPrm = [];
+		this._calcPrm = (function(){
+			var initPrm = {ro: 0, v: 1, E: 0};
+			var calcParam = {};
+			for(var prm in initPrm) {			
+				if(initPrm[prm] == 1) {
+					for(var i = 0; i < self.dims; i++){
+						calcParam[prm+i] = "";
+					}
+				} else {
+					calcParam[prm] = "";
+				}
+			}
+			return calcParam;
+		})();
 		
 		this._data = {};
+		
+		if(initf !== undefined) {
+		// Конструирование полной сетки
+		    
+		}
 	}
 	Mesh.prototype._moveNewToOld = function() {		
-		m.foreach(0,function(d,i){
+		this.foreach(0,function(d,i){
 			for(var prm in this._movedParam) {
 				if(d[prm+"_new"][i] !== undefined) {
 					d[prm][i] = d[prm+"_new"][i];
@@ -95,8 +116,13 @@
 			}
 		});
 	};
-	Mesh.prototype.foreach = function(i,f){
-		
+	Mesh.prototype.foreach = function(i,f, b, c) {
+	    /*b= b||this._f[i];
+	    c = c||this._sizeData(this.dims);
+	    for(var i = b, k = 0; i<this._sizeData(this.dims) && k < c; i = this._data["_i"+(n%this.dims)][i], k++){
+		    f(this._data, i, this._data["_i"+(n%this.dims)][i]);
+	    }
+	    return i;*/
 	};
 	Mesh.prototype.deletePiont = function(i) {		
 		for(var p in this._data) {
@@ -108,25 +134,71 @@
 				DOWN: "DOWN",
 				UP: "UP"
 			};
-	function MMesh(d,k) {
+	function MMesh(d,k,h, initf) {
 		this.k = k;
 		this.prevStep = STEP.FORWARD;
 		this.i = 0;
-		this.mm = [new Mesh(d)];
+		this.mm = [new Mesh(d,h, initf)];
 		this.end = false;
+		var self = this;
 		this.stepers = 
 		{
 				FORWARD: function (){
-					var m = this._mesh();
+					var m = self._mesh();
 					// 0. (new) E(new)?=>: (old)
 					m._moveNewToOld();
 					// а. (old) Построение решения гиперболических уравнений по вычисленным потокам (new)
 					m.foreach(0, function(d,i){
-						for(var prm in m._calcPrm) {
-							
+					    var d_new = {};
+					    var dfi = [];
+					    for(var j = 0; j < m.dims; j++) {
+    						var j_1 = d["_n-"+j][i]
+    						var j1 = d["_n"+j][i];
+    						j_1 = (j_1 === undefined?j:j_1);
+    						j1 = (j1 === undefined?j:j1);
+    						r = (j_1==j?0:1)+(j1==j?0:1);
+    						dfi[i] = (d._fi[j1]-d._fi[j_1])/(r*mesh._h);
+                        }
+						for(var prm in m._calcPrm) {							
+							d_new[prm] = 0;
+							for(var j = 0; j < m.dims; j++) {
+							    d_new[prm] += m.dt/m._h*(d["_F"+prm+"_"+j+"_1"][i] - d["_F"+prm+"_"+j+"_1"][i]);
+							    switch(prm[0]) {
+							    case "v":
+							        d_new[prm] -= dt*d["ro"][i]*dfi[i];
+							        break;
+							    case "E":
+							        d_new[prm] -= dt*d["ro"][i]*d["v"+j][i]*dfi[i];
+							        break;
+							    }
+							}
 						}
+						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Error("ro gone below zero!");	
+				        for (var k = 0 ; k < m.dims; k++) {
+					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][j] + d_new["ro"])) > 3e8) throw new Error("v"+i+" gone above light speed!");
+					        d["v"+k+"_new"][i] = (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][j] + d_new["ro"]);
+				        }
+				        if((d["E"][j] + d_new["E"]) <= 0) throw new Error("E gone below zero!");
+				        d["E_new"][i] = d["E"][i] + d_new["E"];
+				        d["ro_new"][i] = d["ro"][i] + d_new["ro"];
 					});
-					// б. (new) Рассчёт g и f-критериев 
+					// б. (new) Рассчёт g и f-критериев
+					m.foreach(0, function(d,i){
+		                var vv = 0;
+		                for(var j = 0; j < m.dims; j++) {
+			                vv += d["v"+j+"_new"][i]*d["v"+j+"_new"][i];
+		                }
+		                /*
+		                var cv = d.v0[j]/Math.sqrt(vv);
+		                var sv = d.v1[j]/Math.sqrt(vv);
+		                d.vv[j] = (vv==0)?(-2*Math.PI):(Math.atan(sv/cv)+((cv<0)?(Math.sign(sv)*Math.PI):0));
+		                */
+		                var gm = 5/3;
+		                if((gm-1)*(d.E[i]-d.ro[i]*vv/2) < 0) throw new Error("p gone below zero!");
+		                d["p_new"][i] = (gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
+		                d["a_new"][i] = Math.sqrt(gm*d.p_new[i]/d.ro_new[i]);
+					    
+					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
 					// г. (new) Решение эллиптических уравнений (new)
 					// д. (new) Рассчёт потоков для гиберболических уравнений (new)
@@ -134,7 +206,7 @@
 					m.stepCounter -= 1;
 				},
 				DOWN: function (){
-					var m = this._mesh();
+					var m = self._mesh();
 					// а. (old) Помещение точек согласно g,f-критериям в буфер, ели они есть
 					// б. (old) Помещение граничных точек в буфер (граничная точка сетки -- это такая точка не удолетворяющая g,f-критериям, но имеющая таковую в соседях по Муру на расстоянии 1)
 					// *. При помещении точек вместо решений эллиптических уравнений забирается усреднение этого решения по граням.
@@ -147,7 +219,7 @@
 					// ж. Установить счётчик шагов на k
 				},
 				UP:  function (){
-					var m = this._mesh();
+					var m = self._mesh();
 					// 0. (new) => (old)
 					m._moveNewToOld();
 					// а. (old) Поместить все неграничные точки сетки в буфер
@@ -155,7 +227,7 @@
 					m.foreach(0,function(d,i){
 						if(!d["_buff_p"][i]) {
 							var monade = d["_monade"][i];
-							var bu = buff[]||[];
+							var bu = buff[monade]||[];
 							var p = {};
 							for(var prm in m._movedParam) {
 								if(prm.substr(2) == "_F") {
@@ -177,7 +249,7 @@
 						var p = {};
 						for(var prm in m._movedParam) {
 							var cnt = 0;
-							for(int j = 0; j < x.length(); j++) {
+							for(var j = 0; j < x.length(); j++) {
 								var val = x[j][prm];
 								if(val !== undefined) {
 									p[prm] += val;
@@ -189,8 +261,8 @@
 						buff[i] = p;
 					});
 					// Уменьшить номер текущей сетки на 1.
-					this.i--;
-					m = this._mesh();
+					self.i--;
+					m = self._mesh();
 					// д. (old) Вставить точки из буфера
 					m.foreach(0, function(d,i) {
 						if(buff[i]) {
@@ -290,8 +362,18 @@
 		}
 	};
 	
-	var mm = new MMesh(2);
-	mm._mesh().stepCounter = 0;
+	var mm = new MMesh(2, 2, 1e17, function(c) {
+	    var d = {};
+	    var r2 = 0;
+	    for(var i = 0; i < c.length; i++) {
+	        d["v"+i] = 0;
+	        r2 += c[i]*c[i];
+	    }
+	    d.ro = 1e-21 + (0.01/(1+1e-14*r2*r2));
+	    d.E = d.ro*10;
+	    return d;
+	});
+	mm._mesh().stepCounter = 1;
 	do {
 		mm.doStep(mm.selectStep());
 		mm.drawStep([{canvas: null, prm: "ro"}]);					
