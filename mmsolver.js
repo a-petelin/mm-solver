@@ -194,9 +194,11 @@
 		                d.vv[j] = (vv==0)?(-2*Math.PI):(Math.atan(sv/cv)+((cv<0)?(Math.sign(sv)*Math.PI):0));
 		                */
 		                var gm = 5/3;
-		                if((gm-1)*(d.E[i]-d.ro[i]*vv/2) < 0) throw new Error("p gone below zero!");
+		                if((gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Error("p gone below zero!");
 		                d["p_new"][i] = (gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
 		                d["a_new"][i] = Math.sqrt(gm*d.p_new[i]/d.ro_new[i]);
+					    
+					    
 					    
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
