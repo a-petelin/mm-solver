@@ -46,11 +46,92 @@
 
 (function(){
 	var kk = 0.25;
+	function Solvers() {
+	}	
+	Solvers.EllipticSolver = function(mesh) {
+	    
+	}
+	
+	Solvers.gm = 5/3;
+	Solvers.G = 6.67e-11;
+	
+	Solvers.SignalSpeed = function(xL, xR, i, Pst) {
+		var S = {};
+		//S["L"] = xL["v"+i] - Math.sqrt((Solvers.gm-1)*((xL.E+xL.p)/xL.ro-xL["v"+i]*xL["v"+i]/2));
+		S["L"] = xL["v"+i] - xL["a"]*((Pst > xL["p"])?Math.sqrt(1+(1+Solvers.gm)/(2*Solvers.gm)*(Pst/xL["p"] - 1)):1);
+		if(Math.abs(S["L"]) > 3e8) throw new Error("SL gone above light speed!");
+		//S["R"] = xR["v"+i] + Math.sqrt((Solvers.gm-1)*((xR.E+xL.p)/xR.ro-xR["v"+i]*xR["v"+i]/2));
+		S["R"] = xR["v"+i] + xR["a"]*((Pst > xR["p"])?Math.sqrt(1+(1+Solvers.gm)/(2*Solvers.gm)*(Pst/xR["p"] - 1)):1);
+		if(Math.abs(S["R"]) > 3e8) throw new Error("SR gone above light speed!");
+		return S;
+	}
+
+	Solvers.RiemanSolver = function(xL, xR, i, dimn) {
+		var Pst = Math.max(0,(xL["p"]+xR["p"])/2-(xL["ro"]+xR["ro"])/2*(xL["a"]+xR["a"])/2*(xR["v"+i] - xL["v"+i])/2);
+		var S = Solvers.SignalSpeed(xL, xR, i, Pst);	
+		var SL = S.L;
+		var SR = S.R;
+		var Sst = (xR["p"] - xL["p"] + xL["ro"]*xL["v"+i]*(SL-xL["v"+i]) - xR["ro"]*xR["v"+i]*(SR-xR["v"+i]))/(xL["ro"]*(SL-xL["v"+i])-xR["ro"]*(SR-xR["v"+i]));
+		var FLro = xL["ro"]*xL["v"+i];		
+		var FRro = xR["ro"]*xR["v"+i];
+		var ULro = xL["ro"];
+		var URro = xR["ro"];
+		var FLv = new Array(dimn);//xL["ro"]*xL["v"+i]*xL["v"+i] + xL["p"];
+		var FRv = new Array(dimn);//xR["ro"]*xR["v"+i]*xR["v"+i] + xR["p"];
+		var ULv = new Array(dimn);//xL["ro"]*xL["v"+i];
+		var URv = new Array(dimn);//xR["ro"]*xR["v"+i];
+		for (var k = 0 ; k < dimn; k++) {
+			FLv[k] = xL["ro"]*xL["v"+i]*xL["v"+k];
+			FRv[k] = xR["ro"]*xR["v"+i]*xR["v"+k];
+			if(k == i) {
+				FLv[k] += xL["p"];
+				FRv[k] += xR["p"];
+			}
+			ULv[k] = xL["ro"]*xL["v"+k];
+			URv[k] = xR["ro"]*xR["v"+k];
+		}
+		var FLE = xL["v"+i]*(xL["E"] + xL["p"]);
+		var FRE = xR["v"+i]*(xR["E"] + xR["p"]);
+		var ULE = xL["E"];
+		var URE = xR["E"];
+		var x = {};
+		x.S = Math.max(Math.abs(SL), Math.abs(SR));
+		if(SL > 0) {	
+			x["Fro"] = FLro;
+			for (var k = 0 ; k < dimn; k++) {
+				x["Fv"+k] = FLv[k];
+			}
+			x["FE"] = FLE;
+		} else if(SL <= 0 && Sst >= 0) {						
+			var UstL = xL["ro"]*(SL - xL["v"+i])/(SL - Sst);
+			x["Fro"] = FLro + SL*(UstL*1 - ULro);
+			for (var k = 0 ; k < dimn; k++) {
+				x["Fv"+k] = FLv[k] + SL*(UstL*(k==i?Sst:xL["v"+k]) - ULv[k]);
+			}
+			x["FE"] = FLE + SL*(UstL*(xL["E"]/xL["ro"]+(Sst-xL["v"+i])*(Sst+(xL["p"])/(xL["ro"]*(SL - xL["v"+i])))) - ULE);
+		} else if(Sst <= 0 && SR >= 0) {						
+			var UstR = xR["ro"]*(SR - xR["v"+i])/(SR - Sst);
+			x["Fro"] = FRro + SR*(UstR*1 - URro);
+			for (var k = 0 ; k < dimn; k++) {
+				x["Fv"+k] = FRv[k] + SR*(UstR*(k==i?Sst:xR["v"+k]) - URv[k]);
+			}
+			x["FE"] = FRE + SR*(UstR*(xR["E"]/xR["ro"]+(Sst-xR["v"+i])*(Sst+(xR["p"])/(xR["ro"]*(SR - xR["v"+i])))) - URE);
+		} else if(SR < 0) {
+			x["Fro"] = FRro;
+			for (var k = 0 ; k < dimn; k++) {
+				x["Fv"+k] = FRv[k];
+			}
+			x["FE"] = FRE;
+		}
+		return x;
+	}
+	
 	function Mesh(d, h, initf) {
 		this.stepCounter = 0;
 		this.isCriterialPoints = false;
 		this.dims = d;
-		this._h = h;		
+		this._h = h;
+		this.blocks = [];		
 		var self = this;
 
 		this._movedParam = (function(){
@@ -99,15 +180,26 @@
 			return calcParam;
 		})();
 		
+		this._flowPrm = (function(){
+			var initPrm = {ro: 0, v: 1, E: 0, p: 0, a: 0};
+		    var flowParam = {};
+			for(var prm in initPrm) {			
+				if(initPrm[prm] == 1) {
+					for(var i = 0; i < self.dims; i++){
+						flowParam[prm+i] = "";
+					}
+				} else {
+					flowParam[prm] = "";
+				}
+			}
+		    return flowParam;
+		})();
+		
 		this._data = {};
 		
 		this.dt = 1;
 		
-		if(initf !== undefined) {
-		// Конструирование полной сетки
-		
-		
-		// STUB for test only
+		if(initf !== undefined) {// STUB for test only
 		    var c = [];
 			for(var i=0;i<this.dims;i++) {
 				c.push(0);
@@ -120,7 +212,10 @@
 			var dd = initf(c);
 			for(var prm in this._calcPrm) {
 				this._data[prm][0] = dd[prm];
-			}			
+			}	
+			return;
+		// Конструирование полной сетки
+		    
 		}
 	}
 	Mesh.prototype._moveNewToOld = function() {	
@@ -134,15 +229,17 @@
 			}
 		});
 	};
-	Mesh.prototype.foreach = function(i,f, b, c) {
-	    /*b= b||this._f[i];
+	Mesh.prototype.foreach = function(i,f, b, c) {	
+		// STUB for test only
+		f(this._data, 0);
+		return;
+		
+	    b= b||this._f[i];
 	    c = c||this._sizeData(this.dims);
 	    for(var i = b, k = 0; i<this._sizeData(this.dims) && k < c; i = this._data["_i"+(n%this.dims)][i], k++){
 		    f(this._data, i, this._data["_i"+(n%this.dims)][i]);
 	    }
-	    return i;*/
-		// STUB for test only
-		f(this._data, 0);
+	    return i;
 	};
 	Mesh.prototype.deletePiont = function(i) {		
 		for(var p in this._data) {
@@ -154,7 +251,7 @@
 				DOWN: "DOWN",
 				UP: "UP"
 			};
-	function MMesh(d,k,h, initf) {
+	function MMesh(d,k,h,curn, initf) {
 		this.k = k;
 		this.prevStep = STEP.FORWARD;
 		this.i = 0;
@@ -162,6 +259,7 @@
 		this.end = false;
 		var self = this;
 		this.kcr = 1/k/k;
+		this.curn = curn;
 		this.stepers = 
 		{
 				FORWARD: function (){
@@ -169,6 +267,9 @@
 					// 0. (new) E(new)?=>: (old)
 					m._moveNewToOld();
 					// а. (old) Построение решения гиперболических уравнений по вычисленным потокам (new)
+					if(m.Smax && !self.i) {
+					    m.dt = self.curn * m._h / m.Smax;
+					}
 					m.foreach(0, function(d,i){
 					    var d_new = {};
 					    var dfi = [];
@@ -187,7 +288,12 @@
 						for(var prm in m._calcPrm) {							
 							d_new[prm] = 0;
 							for(var j = 0; j < m.dims; j++) {
-							    d_new[prm] += m.dt/m._h*((d["_F"+prm+"_"+j+"_1"]||[])[i]||0 - (d["_F"+prm+"_"+j+"_1"]||[])[i]||0);
+							    var f1,f_1;
+							    f_1 = d["_F"+prm+"_"+j+"_1"]||[];
+							    f1 = d["_F"+prm+"_"+j+"_2"]||[];
+							    f_1 = f_1[i]||0;
+							    f1 = f1[i]||0;
+							    d_new[prm] += m.dt/m._h*(f_1 - f1);
 							    switch(prm[0]) {
 							    case "v":
 							        d_new[prm] -= m.dt*d["ro"][i]*dfi[j];
@@ -200,7 +306,7 @@
 						}
 						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Error("ro gone below zero!");	
 				        for (var k = 0 ; k < m.dims; k++) {
-					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Error("v"+i+" gone above light speed!");
+					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Error("v"+k+" gone above light speed!");
 							if(d["v"+k+"_new"] === undefined) d["v"+k+"_new"] = [];
 					        d["v"+k+"_new"][i] = (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]);
 				        }
@@ -221,14 +327,13 @@
 		                var sv = d.v1[j]/Math.sqrt(vv);
 		                d.vv[j] = (vv==0)?(-2*Math.PI):(Math.atan(sv/cv)+((cv<0)?(Math.sign(sv)*Math.PI):0));
 		                */
-		                var gm = 5/3;
-		                if((gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Error("p gone below zero!");
-		                if(d["p"] === undefined) d["p"] = [];
-				        d["p"][i] = (gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
-		                if(d["a"] === undefined) d["a"] = [];
-				        d["a"][i] = Math.sqrt(gm*d.p[i]/d.ro_new[i]);
+		                if((Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Error("p gone below zero!");
+		                if(d["p_new"] === undefined) d["p_new"] = [];
+				        d["p_new"][i] = (Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
+		                if(d["a_new"] === undefined) d["a_new"] = [];
+				        d["a_new"][i] = Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]);
 					    
-						d["_fcr"][i] = m._h/Math.sqrt(Math.PI*d.a[i]*d.a[i]/6.67e-11/d.ro_new[i]);
+						d["_fcr"][i] = m._h/Math.sqrt(Math.PI*d.a_new[i]*d.a_new[i]/Solvers.G/d.ro_new[i]);
 						
 						var fn_cr = -Infinity;
 						for(var prm in m._calcPrm) {
@@ -251,17 +356,65 @@
 							if(!isMonade) {
 								m.isCriterialPoints = true;
 							}
+							if(d["_is_move_down"] === undefined) d["_is_move_down"] = [];
+							d["_is_move_down"][i] = true;
 						}
 					})
 					// г. (new) Решение эллиптических уравнений (new)
+					for(var i = 0; i < m.blocks.length; i++) {
+					    Solvers.EllipticSolver(m.blocks[i]);
+					}
 					// д. (new) Рассчёт потоков для гиберболических уравнений (new)
+					m.Smax = 0;
+					for(var i = 0; i < m.dims; i++) {
+					    m.foreach(i, (function(){var p_flow;
+					            return function(d,j){
+					                var j_1 = d["_n-"+i][j]
+								    var j1 = d["_n"+i][j];
+								    j_1 = (j_1 === undefined?j:j_1);
+								    j1 = (j1 === undefined?j:j1);
+								    var x={},x_1={},x1={};
+								    for(var prm in m._flowPrm) {
+								        x[prm] = d[prm+"_new"][j];
+								        x_1[prm] = d[prm+"_new"][j_1];
+								        x1[prm] = d[prm+"_new"][j1];
+								    }
+								    var flow = Solvers.RiemanSolver(x, x1, i, m.dims);
+								    if(!p_flow) {
+    							        p_flow = Solvers.RiemanSolver(x_1, x, i, m.dims);
+    							    }
+								    for(var k = 1; k < 3; k++) {
+	    							    for(var prm in m._calcPrm) {
+	    							        if(d["_F"+prm+"_"+i+"_"+k+"_new"] === undefined) d["_F"+prm+"_"+i+"_"+k+"_new"] = [];
+	    							        d["_F"+prm+"_"+i+"_"+k+"_new"][j] = p_flow["F"+prm];
+	    							    }
+	    							    m.Smax = Math.max(m.Smax, p_flow.S);
+	    							    p_flow = flow;
+	    							}
+					            };
+					    })());
+					}
 					// е. Уменьшить счётчик шагов на 1
 					m.stepCounter -= 1;
 				},
 				DOWN: function (){
 					var m = self._mesh();
 					// а. (old) Помещение точек согласно g,f-критериям в буфер, ели они есть
+					var buff = [];
+					m.foreach(0,function(d,i){
+					    if(d["_is_move_down"][i]) {
+					        var p = {};
+							for(var prm in m._movedParam) {
+							    if(d[prm][i] !== undefined) {
+    								p[prm] = d[prm][i];
+    							}
+							}
+							p.monade = i;
+					        buff[i] = p;
+					    }
+					});
 					// б. (old) Помещение граничных точек в буфер (граничная точка сетки -- это такая точка не удолетворяющая g,f-критериям, но имеющая таковую в соседях по Муру на расстоянии 1)
+					
 					// *. При помещении точек вместо решений эллиптических уравнений забирается усреднение этого решения по граням.
 					// в. Разбить каждую точку в буфере на куб из k^d точек.
 					// 0. (new) => (old)
@@ -302,6 +455,7 @@
 						var p = {};
 						for(var prm in m._movedParam) {
 							var cnt = 0;
+							p[prm] = 0;
 							for(var j = 0; j < x.length(); j++) {
 								var val = x[j][prm];
 								if(val !== undefined) {
@@ -415,14 +569,14 @@
 		}
 	};
 	
-	var mm = new MMesh(2, 2, 1e17, function(c) {
+	var mm = new MMesh(2, 2, 1e17, 0.495, function(c) {
 	    var d = {};
 	    var r2 = 0;
 	    for(var i = 0; i < c.length; i++) {
 	        d["v"+i] = 0;
 	        r2 += c[i]*c[i];
 	    }
-	    d.ro = 1e-21 * (1.01/(1+1e-14*r2*r2));
+	    d.ro = 1e-21 + (1e-23/(1+Math.pow(1e-14*Math.sqrt(r2),4)));
 	    d.E = d.ro*10;
 	    return d;
 	});
