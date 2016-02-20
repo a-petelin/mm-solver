@@ -195,7 +195,12 @@
 		    return flowParam;
 		})();
 		
-		this._data = {};
+		this._data = {
+		    setDataValue: function(prm, i, value) {
+		        if(this[prm] === undefined) this[prm] = [];
+		        this[prm][i] = value;
+		    }
+		};
 		
 		this.dt = 1;
 		
@@ -205,6 +210,7 @@
 				c.push(0);
 				this._data["_n-"+i] = [];
 				this._data["_n"+i] = [];
+				this._data["_c"+i] = [0];
 			}
 			for(var prm in this._movedParam) {
 				this._data[prm] = [];
@@ -213,6 +219,7 @@
 			for(var prm in this._calcPrm) {
 				this._data[prm][0] = dd[prm];
 			}	
+			this._data.setDataValue("fi",0,0);
 			return;
 		// Конструирование полной сетки
 		    
@@ -223,7 +230,7 @@
 		this.foreach(0,function(d,i){
 			for(var prm in self._movedParam) {
 				if((d[prm+"_new"]||[])[i] !== undefined) {
-					d[prm][i] = d[prm+"_new"][i];
+					d.setDataValue(prm,i,d[prm+"_new"][i]);
 					delete d[prm+"_new"][i];
 				}
 			}
@@ -307,14 +314,11 @@
 						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Error("ro gone below zero!");	
 				        for (var k = 0 ; k < m.dims; k++) {
 					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Error("v"+k+" gone above light speed!");
-							if(d["v"+k+"_new"] === undefined) d["v"+k+"_new"] = [];
-					        d["v"+k+"_new"][i] = (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]);
+							d.setDataValue("v"+k+"_new",i, d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]);
 				        }
 				        if((d["E"][j] + d_new["E"]) <= 0) throw new Error("E gone below zero!");
-						if(d["E_new"] === undefined) d["E_new"] = [];
-				        d["E_new"][i] = d["E"][i] + d_new["E"];
-						if(d["ro_new"] === undefined) d["ro_new"] = [];
-				        d["ro_new"][i] = d["ro"][i] + d_new["ro"];
+						d.setDataValue("E_new",i,d["E"][i] + d_new["E"]);
+				        d.setDataValue("ro_new",i,d["ro"][i] + d_new["ro"]);
 					});
 					// б. (new) Рассчёт g и f-критериев
 					m.foreach(0, function(d,i){
@@ -328,10 +332,8 @@
 		                d.vv[j] = (vv==0)?(-2*Math.PI):(Math.atan(sv/cv)+((cv<0)?(Math.sign(sv)*Math.PI):0));
 		                */
 		                if((Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Error("p gone below zero!");
-		                if(d["p_new"] === undefined) d["p_new"] = [];
-				        d["p_new"][i] = (Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2);	
-		                if(d["a_new"] === undefined) d["a_new"] = [];
-				        d["a_new"][i] = Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]);
+		                d.setDataValue("p_new",i,(Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2));
+				        d.setDataValue("a_new",i,Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]));
 					    
 						d["_fcr"][i] = m._h/Math.sqrt(Math.PI*d.a_new[i]*d.a_new[i]/Solvers.G/d.ro_new[i]);
 						
@@ -356,8 +358,7 @@
 							if(!isMonade) {
 								m.isCriterialPoints = true;
 							}
-							if(d["_is_move_down"] === undefined) d["_is_move_down"] = [];
-							d["_is_move_down"][i] = true;
+							d.setDataValue("_is_move_down",i,true);
 						}
 					})
 					// г. (new) Решение эллиптических уравнений (new)
@@ -385,8 +386,7 @@
     							    }
 								    for(var k = 1; k < 3; k++) {
 	    							    for(var prm in m._calcPrm) {
-	    							        if(d["_F"+prm+"_"+i+"_"+k+"_new"] === undefined) d["_F"+prm+"_"+i+"_"+k+"_new"] = [];
-	    							        d["_F"+prm+"_"+i+"_"+k+"_new"][j] = p_flow["F"+prm];
+	    							        d.setDataValue("_F"+prm+"_"+i+"_"+k+"_new",j,p_flow["F"+prm]);
 	    							    }
 	    							    m.Smax = Math.max(m.Smax, p_flow.S);
 	    							    p_flow = flow;
@@ -399,27 +399,79 @@
 				},
 				DOWN: function (){
 					var m = self._mesh();
-					// а. (old) Помещение точек согласно g,f-критериям в буфер, ели они есть
 					var buff = [];
-					m.foreach(0,function(d,i){
-					    if(d["_is_move_down"][i]) {
-					        var p = {};
-							for(var prm in m._movedParam) {
-							    if(d[prm][i] !== undefined) {
+					buff.addRealPoint = function(m,d,i) {
+    					var p = {};
+					    for(var prm in m._movedParam) {
+					        if(d[prm][i] !== undefined) {
+								p[prm] = d[prm][i];
+							}
+					    }
+					    for(var j=0;j<m.dims;j++) {
+					        p["_c"+j] = d["_c"+j][i];
+					    }
+					    p.monade = i;
+			            this[i] = p;
+					}
+					buff.addBuffPoint = function(m,d,i) {
+				        if(!d["_is_move_down"][i]) {
+				            var p = {};
+					        for(var prm in m._movedParam) {
+					            if(d[prm][i] !== undefined) {
     								p[prm] = d[prm][i];
     							}
-							}
-							p.monade = i;
-					        buff[i] = p;
+					        }
+					        for(var j=0;j<m.dims;j++) {
+					            p["_c"+j] = d["_c"+j][i];
+					        }
+					        p.monade = i;
+					        p._buff_p = true;
+			                this[i] = p;
+				            d["_is_move_down"][i] = true;
+				        }
+					}
+					// а. (old) Помещение точек согласно g,f-критериям в буфер, ели они есть
+					m.foreach(0,function(d,i){
+					    if(d["_is_move_down"][i]) {
+					        buff.addRealPoint(m,d,i);
 					    }
 					});
 					// б. (old) Помещение граничных точек в буфер (граничная точка сетки -- это такая точка не удолетворяющая g,f-критериям, но имеющая таковую в соседях по Муру на расстоянии 1)
-					
+					for(var i=0;i<m.dims;i++) {
+					    m.foreach(i,function(d,j){
+					        if(d["_is_move_down"][j]) {
+					            var j_1 = d["_n-"+i][j];
+						        var j1 = d["_n"+i][j];
+						        j_1 = (j_1 === undefined?j:j_1);
+						        j1 = (j1 === undefined?j:j1);
+						        buff.addBuffPoint(m,d,j_1);
+						        buff.addBuffPoint(m,d,j1);
+						    }
+					    });
+					}
 					// *. При помещении точек вместо решений эллиптических уравнений забирается усреднение этого решения по граням.
 					// в. Разбить каждую точку в буфере на куб из k^d точек.
+					buff.forEach(function(p,i, buff){
+					    var cube = [];
+					    for(var j = 0;j<Math.pow(self.k, m.dims);j++){
+					        var p1 = {};
+					        for(var prm in p) {
+					            p1[prm] = p[prm];
+					        }
+					        for(var j=0;j<m.dims;j++) {
+					            
+					        }
+					        p1.i = 0;
+					    }
+					    buff[i] = cube;
+					});
 					// 0. (new) => (old)
+					m._moveNewToOld();
 					// г. Увеличить номер текущей сетки на 1
+					self.i++;
+					m = self._mesh();
 					// д. (old) Вставить точки из буфера в сетку
+					delete buff;
 					// е. (old) Разбить сетку на блоки
 					// ё. (old) Для точек каждого блока остаить только те значения эллиптических уравнений, которые лежать на граничных для блока гранях.
 					// ж. Установить счётчик шагов на k
@@ -451,13 +503,13 @@
 						}
 					});
 					// Каждый куб из k^d точек буфера собрать в одну точку
-					buff.forEach(function(x,i, buff){
+					buff.forEach(function(cube,i, buff){
 						var p = {};
 						for(var prm in m._movedParam) {
 							var cnt = 0;
 							p[prm] = 0;
-							for(var j = 0; j < x.length(); j++) {
-								var val = x[j][prm];
+							for(var j = 0; j < cube.length(); j++) {
+								var val = cube[j][prm];
 								if(val !== undefined) {
 									p[prm] += val;
 									cnt++;
@@ -509,6 +561,10 @@
 		};
 	}
 	MMesh.prototype._mesh = function () {
+		if(this.i == this.mm.length) {
+		    var m = this.mm[this.i-1];
+		    this.mm.push(new Mesh(m.dims,m._h/this.k));
+        }
 		return this.mm[this.i];
 	};
 	MMesh.prototype._iUpMesh = function() {
