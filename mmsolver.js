@@ -204,6 +204,7 @@
 		
 		this._N = [];
 		this._f = [];
+		this.size = 1;
 		
 		if(initf !== undefined) {
 			// STUB for test only
@@ -422,7 +423,7 @@
     					this[i] = this.getPoint(m,d,i);
 					}
 					buff.addBuffPoint = function(k,m,d,i) {
-				        if(!d["move_down"][i]) {
+				        if(!d["_move_down"][i]) {
 				            var p = this.getPoint(m,d,i);
 					        p._buff_p = true;
 			                this[i] = p;
@@ -431,7 +432,7 @@
 					}
 					// а. (old) Помещение точек согласно g,f-критериям в буфер, если они есть
 					m.foreach(0,function(d,i){
-					    if(d["move_down"][i]) {
+					    if(d["_move_down"][i]) {
 					        buff.addRealPoint(m,d,i);
 							d.setDataValue("_is_monade",i,true);
 					    } else if(d["_is_monade"][i]) {
@@ -441,7 +442,7 @@
 					// б. (old) Помещение граничных точек в буфер (граничная точка сетки -- это такая точка не удолетворяющая g,f-критериям, но имеющая таковую в соседях по Муру на расстоянии 1)
 					for(var i=0;i<m.dims;i++) {
 					    m.foreach(i,function(d,j){
-					        if(d["move_down"][j] == (i+1)) {
+					        if(d["_move_down"][j] == (i+1)) {
 					            var j_1 = d["_n-"+i][j];
 						        var j1 = d["_n"+i][j];
 						        j_1 = (j_1 === undefined?j:j_1);
@@ -498,14 +499,45 @@
 					// 0. (new) => (old)
 					m._moveNewToOld();
 					// г. Увеличить номер текущей сетки на 1
+					var dt = m.dt / self.k;
 					self.i++;
 					m = self._mesh();
+					m.dt = dt;					
 					// д. (old) Вставить точки из буфера в сетку
 					buff.forEach(function(cube,i, buff){
-						
+						for(var j = 0; j < cube.length; j++) {
+						    var p = cube[j];
+						    var k = p.i;
+						    delete p.i;
+						    for(var prm in p) {
+						        m._data.setDataValue(prm,k,p[prm]);
+						    }
+						    delete cube[j];
+						}
+						delete buff[i];
 					});
 					delete buff;
 					// е. (old) Разбить сетку на блоки
+					var jj = [], prev_i;
+					m._data["_monade"].forEach(function(x,i){
+					    if(prev_i === undefined) {
+					        m._f[0] = i;
+					    } else {
+					        m._data.setDataValue("_i0",prev_i,i);
+					        var isNeib = (i - prev_i) == 1;
+					        for(var j = 1; j < m.dims; j++) {
+					            isNeib = isNeib && (m._data["_c"+j][prev_i] == m._data["_c"+j][i]);
+					        }
+					        if(isNeib) {
+					            m._data.setDataValue("_n0",prev_i,i);
+					            m._data.setDataValue("_n-0",i,prev_i);
+					        }
+					    }
+					    prev_i = i;
+					});
+					for(var i = 0; i < m.dims; i++) {
+    			        m._data.setDataValue("_i"+i,prev_i,m.size);
+    			    }
 					// ё. (old) Для точек каждого блока остаить только те значения эллиптических уравнений, которые лежать на граничных для блока гранях.
 					// ж. Установить счётчик шагов на k
 				},
@@ -541,7 +573,7 @@
 						for(var prm in m._movedParam) {
 							var cnt = 0;
 							p[prm] = 0;
-							for(var j = 0; j < cube.length(); j++) {
+							for(var j = 0; j < cube.length; j++) {
 								var val = cube[j][prm];
 								if(val !== undefined) {
 									p[prm] += val;
@@ -597,6 +629,10 @@
 		if(this.i == this.mm.length) {
 		    var m = this.mm[this.i-1];
 		    this.mm.push(new Mesh(m.dims,m._h/this.k));
+		    for(var i = 0; i < m.dims; i++) {
+    		    this.mm[this.i]._N[i] = m._N[i]*this.k;
+    		}
+    		this.mm[this.i].size = m.size * Math.pow(this.k, m.dims);
         }
 		return this.mm[this.i];
 	};
