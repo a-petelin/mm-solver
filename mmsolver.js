@@ -202,12 +202,15 @@
 		    }
 		};
 		
-		this.dt = 1;
+		this._N = [];
+		this._f = [];
 		
-		if(initf !== undefined) {// STUB for test only
+		if(initf !== undefined) {
+			// STUB for test only
 		    var c = [];
 			for(var i=0;i<this.dims;i++) {
 				c.push(0);
+				this._N.push(1);
 				this._data["_n-"+i] = [];
 				this._data["_n"+i] = [];
 				this._data["_c"+i] = [0];
@@ -219,7 +222,7 @@
 			for(var prm in this._calcPrm) {
 				this._data[prm][0] = dd[prm];
 			}	
-			this._data.setDataValue("fi",0,0);
+			this._data.setDataValue("fi",0,0);			
 			return;
 		// Конструирование полной сетки
 		    
@@ -263,6 +266,7 @@
 		this.prevStep = STEP.FORWARD;
 		this.i = 0;
 		this.mm = [new Mesh(d,h, initf)];
+		this.mm[0].dt = 1;
 		this.end = false;
 		var self = this;
 		this.kcr = 1/k/k;
@@ -353,12 +357,13 @@
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
 					m.foreach(0, function(d,i){
-						if(d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr) {
+						var isBuff = (d["_buff_p"]||[])[i];
+						if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr)) {
 							var isMonade = (d["_is_monade"]||[])[i];
 							if(!isMonade) {
 								m.isCriterialPoints = true;
-							}
-							d.setDataValue("_is_move_down",i,true);
+								d.setDataValue("_move_down",i,1);
+							};
 						}
 					})
 					// г. (new) Решение эллиптических уравнений (new)
@@ -400,8 +405,8 @@
 				DOWN: function (){
 					var m = self._mesh();
 					var buff = [];
-					buff.addRealPoint = function(m,d,i) {
-    					var p = {};
+					buff.getPoint = function(m,d,i) {
+						var p = {};
 					    for(var prm in m._movedParam) {
 					        if(d[prm][i] !== undefined) {
 								p[prm] = d[prm][i];
@@ -410,58 +415,83 @@
 					    for(var j=0;j<m.dims;j++) {
 					        p["_c"+j] = d["_c"+j][i];
 					    }
-					    p.monade = i;
-			            this[i] = p;
+					    p._monade = i;
+			            return p;
 					}
-					buff.addBuffPoint = function(m,d,i) {
-				        if(!d["_is_move_down"][i]) {
-				            var p = {};
-					        for(var prm in m._movedParam) {
-					            if(d[prm][i] !== undefined) {
-    								p[prm] = d[prm][i];
-    							}
-					        }
-					        for(var j=0;j<m.dims;j++) {
-					            p["_c"+j] = d["_c"+j][i];
-					        }
-					        p.monade = i;
+					buff.addRealPoint = function(m,d,i) {
+    					this[i] = this.getPoint(m,d,i);
+					}
+					buff.addBuffPoint = function(k,m,d,i) {
+				        if(!d["move_down"][i]) {
+				            var p = this.getPoint(m,d,i);
 					        p._buff_p = true;
 			                this[i] = p;
-				            d["_is_move_down"][i] = true;
+				            d["_move_down"][i] = k;
 				        }
 					}
-					// а. (old) Помещение точек согласно g,f-критериям в буфер, ели они есть
+					// а. (old) Помещение точек согласно g,f-критериям в буфер, если они есть
 					m.foreach(0,function(d,i){
-					    if(d["_is_move_down"][i]) {
+					    if(d["move_down"][i]) {
 					        buff.addRealPoint(m,d,i);
-					    }
+							d.setDataValue("_is_monade",i,true);
+					    } else if(d["_is_monade"][i]) {
+							d["_move_down"][i] = 1;
+						}
 					});
 					// б. (old) Помещение граничных точек в буфер (граничная точка сетки -- это такая точка не удолетворяющая g,f-критериям, но имеющая таковую в соседях по Муру на расстоянии 1)
 					for(var i=0;i<m.dims;i++) {
 					    m.foreach(i,function(d,j){
-					        if(d["_is_move_down"][j]) {
+					        if(d["move_down"][j] == (i+1)) {
 					            var j_1 = d["_n-"+i][j];
 						        var j1 = d["_n"+i][j];
 						        j_1 = (j_1 === undefined?j:j_1);
 						        j1 = (j1 === undefined?j:j1);
-						        buff.addBuffPoint(m,d,j_1);
-						        buff.addBuffPoint(m,d,j1);
+						        buff.addBuffPoint(i+2,m,d,j_1);
+						        buff.addBuffPoint(i+2,m,d,j1);
+								d["_move_down"][j] = i+2;
 						    }
 					    });
 					}
+					m.foreach(0,function(d,i){
+						d["_move_down"][i] = 0;
+					});
 					// *. При помещении точек вместо решений эллиптических уравнений забирается усреднение этого решения по граням.
 					// в. Разбить каждую точку в буфере на куб из k^d точек.
 					buff.forEach(function(p,i, buff){
 					    var cube = [];
+						var ii = [];
+						var jj = p._monade;
+						var kk = [];
+						var dd = [];
+						for(var l = 0; l < m.dims; l++) {
+							ii[l] = jj % m._N[l];
+							jj = (jj - ii[l]) / m._N[l];
+							ii[l] *= self.k;
+							kk.push(0);
+							dd.push((dd[l-1]*m._N[l-1]*self.k)||1);
+						}
 					    for(var j = 0;j<Math.pow(self.k, m.dims);j++){
 					        var p1 = {};
 					        for(var prm in p) {
 					            p1[prm] = p[prm];
 					        }
-					        for(var j=0;j<m.dims;j++) {
-					            
-					        }
 					        p1.i = 0;
+					        for(var k=0;k<m.dims;k++) {
+					            p1.i += (ii[k]+kk[k])*dd[k];
+								p1["_c"+k] = (p["_c"+k] - 0.5*m._h) + (kk[k]+0.5)*m._h/self.k;
+					        }
+							cube.push(p1);
+							var d = 1;
+							var e = 0;
+							do {
+								kk[e] += d;
+								d = 0;
+								if(kk[e] == self.k) {
+									kk[e] = 0;
+									d = 1;
+									e++;
+								}
+							}while(d!=0);
 					    }
 					    buff[i] = cube;
 					});
@@ -471,6 +501,9 @@
 					self.i++;
 					m = self._mesh();
 					// д. (old) Вставить точки из буфера в сетку
+					buff.forEach(function(cube,i, buff){
+						
+					});
 					delete buff;
 					// е. (old) Разбить сетку на блоки
 					// ё. (old) Для точек каждого блока остаить только те значения эллиптических уравнений, которые лежать на граничных для блока гранях.
@@ -625,7 +658,7 @@
 		}
 	};
 	
-	var mm = new MMesh(2, 2, 1e17, 0.495, function(c) {
+	var mm = new MMesh(3, 2, 1e17, 0.495, function(c) {
 	    var d = {};
 	    var r2 = 0;
 	    for(var i = 0; i < c.length; i++) {
