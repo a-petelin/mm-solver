@@ -523,6 +523,11 @@
 					    if(prev_i === undefined) {
 					        m._f[0] = i;
 					    } else {
+							var ci = [], ii = i;
+					        for(var j = 0; j < m.dims; j++) {
+								ci[j] = ii % m._N[j];
+								ii = (ii - ci[j]) / m._N[j];
+							}
 					        m._data.setDataValue("_i0",prev_i,i);
 					        var isNeib = (i - prev_i) == 1;
 					        for(var j = 1; j < m.dims; j++) {
@@ -535,9 +540,7 @@
 					    }
 					    prev_i = i;
 					});
-					for(var i = 0; i < m.dims; i++) {
-    			        m._data.setDataValue("_i"+i,prev_i,m.size);
-    			    }
+    			    m._data.setDataValue("_i0",prev_i,m.size);
 					// ё. (old) Для точек каждого блока остаить только те значения эллиптических уравнений, которые лежать на граничных для блока гранях.
 					// ж. Установить счётчик шагов на k
 				},
