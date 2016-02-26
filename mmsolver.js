@@ -49,7 +49,9 @@
 	function Solvers() {
 	}	
 	Solvers.EllipticSolver = function(mesh) {
-	    
+	    mesh.foreach(0,function(d,i) {
+	        
+	    });
 	}
 	
 	Solvers.gm = 5/3;
@@ -201,6 +203,9 @@
 		        this[prm][i] = value;
 		    }
 		};
+		for(var prm in this._movedParam) {
+			this._data[prm] = [];
+		}
 		
 		this._N = [];
 		this._f = [];
@@ -212,18 +217,17 @@
 			for(var i=0;i<this.dims;i++) {
 				c.push(0);
 				this._N.push(1);
+				this._f.push(0);
 				this._data["_n-"+i] = [];
 				this._data["_n"+i] = [];
+				this._data["_i"+i] = [1];
 				this._data["_c"+i] = [0];
-			}
-			for(var prm in this._movedParam) {
-				this._data[prm] = [];
 			}
 			var dd = initf(c);
 			for(var prm in this._calcPrm) {
 				this._data[prm][0] = dd[prm];
 			}	
-			this._data.setDataValue("fi",0,0);			
+			this._data.setDataValue("fi",0,-1.1);			
 			return;
 		// Конструирование полной сетки
 		    
@@ -240,15 +244,11 @@
 			}
 		});
 	};
-	Mesh.prototype.foreach = function(i,f, b, c) {	
-		// STUB for test only
-		f(this._data, 0);
-		return;
-		
-	    b= b||this._f[i];
-	    c = c||this._sizeData(this.dims);
-	    for(var i = b, k = 0; i<this._sizeData(this.dims) && k < c; i = this._data["_i"+(n%this.dims)][i], k++){
-		    f(this._data, i, this._data["_i"+(n%this.dims)][i]);
+	Mesh.prototype.foreach = function(j,f, b, c) {	
+		b= b||this._f[j];
+	    c = c||this.size;
+	    for(var i = b, k = 0; i<this.size && k < c; i = this._data["_i"+(j%this.dims)][i], k++){
+		    f(this._data, i, this._data["_i"+(j%this.dims)][i]);
 	    }
 	    return i;
 	};
@@ -256,6 +256,19 @@
 		for(var p in this._data) {
 			delete this._data[p];
 		}
+	}
+	function MeshBlock(mesh) {
+	    this._m = mesh;
+	    this.dims = mesh.dims;
+	    this._N = ("0"+new Array(this.dims).join("1")).split("").map(function(x){return 1*x;});
+	    this._data = [];
+	    this.size = 0;
+	}
+	MeshBlock.prototype.foreach = function(i,f, b, c) {	
+	    // STUB for test only
+		f(this._m._data, this._data[0]);
+		return;
+		
 	}
 	var STEP = {
 				FORWARD: "FORWARD",
@@ -369,7 +382,9 @@
 					})
 					// г. (new) Решение эллиптических уравнений (new)
 					for(var i = 0; i < m.blocks.length; i++) {
-					    Solvers.EllipticSolver(m.blocks[i]);
+					    if(m.blocks[i]._data) {
+    					    Solvers.EllipticSolver(m.blocks[i]);
+    					}
 					}
 					// д. (new) Рассчёт потоков для гиберболических уравнений (new)
 					m.Smax = 0;
@@ -456,7 +471,6 @@
 					m.foreach(0,function(d,i){
 						d["_move_down"][i] = 0;
 					});
-					// *. При помещении точек вместо решений эллиптических уравнений забирается усреднение этого решения по граням.
 					// в. Разбить каждую точку в буфере на куб из k^d точек.
 					buff.forEach(function(p,i, buff){
 					    var cube = [];
@@ -516,33 +530,125 @@
 						}
 						delete buff[i];
 					});
+					buff = {};
 					delete buff;
 					// е. (old) Разбить сетку на блоки
-					var jj = [], prev_i;
+					var jj = [], prev_i, cur_block_n;
+    			    var delta = 1;
+					m.blocks = [];
 					m._data["_monade"].forEach(function(x,i){
+						var ii = i, cj = [], ci = [];
+				        for(var j = 0; j < m.dims; j++) {
+							ci[j] = ii % m._N[j];
+							ii = (ii - ci[j]) / m._N[j];
+						}
+						for(var j = 1; j < m.dims; j++) {
+						    var arr = jj[j-1]||[];
+    						ci.push(ci.shift());
+    						var cj = 0;
+    						for(var k = m.dims-1; k > -1; k--) {
+    						    cj *= m._N[k];
+    						    cj += ci[k];
+    						}
+    						arr[cj] = i;
+    						jj[j-1] = arr;
+    					}
 					    if(prev_i === undefined) {
 					        m._f[0] = i;
+					        m.blocks.push(new MeshBlock(m));
+					        cur_block_n = 0;
+					        m._data.setDataValue("_block_b",i,true);
 					    } else {
-							var ci = [], ii = i;
-					        for(var j = 0; j < m.dims; j++) {
-								ci[j] = ii % m._N[j];
-								ii = (ii - ci[j]) / m._N[j];
-							}
 					        m._data.setDataValue("_i0",prev_i,i);
-					        var isNeib = (i - prev_i) == 1;
+					        var isNeib = (i - prev_i) == delta;
 					        for(var j = 1; j < m.dims; j++) {
 					            isNeib = isNeib && (m._data["_c"+j][prev_i] == m._data["_c"+j][i]);
 					        }
 					        if(isNeib) {
 					            m._data.setDataValue("_n0",prev_i,i);
 					            m._data.setDataValue("_n-0",i,prev_i);
+					        } else {					        
+					            m.blocks.push(new MeshBlock(m));
+					            cur_block_n++;
+    					        m._data.setDataValue("_block_b",i,true);
 					        }
 					    }
+				        m.blocks[cur_block_n]._data.push(i);
+				        m.blocks[cur_block_n]._N[0] += 1;
+				        m.blocks[cur_block_n].size += 1;
+				        m._data.setDataValue("_block_n",i,cur_block_n);
 					    prev_i = i;
 					});
     			    m._data.setDataValue("_i0",prev_i,m.size);
-					// ё. (old) Для точек каждого блока остаить только те значения эллиптических уравнений, которые лежать на граничных для блока гранях.
+    			    for(var i = 1; i < m.dims; i++) {
+    			        prev_i = [][0];
+        			    delta *= m._N[i-1];
+    			        jj[i-1].forEach(function(j,x){
+					        if(prev_i === undefined) {
+					            m._f[i] = j;
+					        } else {
+					            m._data.setDataValue("_i"+i,prev_i,j);
+					            var isNeib = true;
+					            for(var k = 0; k < m.dims; k++) {
+					                if(k == i) {
+					                    isNeib = isNeib && (j - prev_i == delta);
+					                } else {
+    					                isNeib = isNeib && (m._data["_c"+k][prev_i] == m._data["_c"+k][j]);
+    					            }
+					            }
+					            if(isNeib) {
+					                m._data.setDataValue("_n"+i,prev_i,j);
+					                m._data.setDataValue("_n-"+i,j,prev_i);
+					                var block = m.blocks[m._data["_block_n"][j]];
+					                if(m._data["_block_b"][j]){
+    					                var prev_block = m.blocks[m._data["_block_n"][prev_i]];
+					                    var isComp = true;
+					                    for(var k = 0; k < m.dims; k++) {
+    				                        if(k != i) {
+    					                        isComp = isComp && block._N[k] == prev_block._N[k];
+    					                    }
+					                    }
+					                    if(isComp) {
+					                        prev_block._N[i] += 1;
+					                        block = m._data["_block_n"][prev_i];
+					                        m.blocks[m._data["_block_n"][j]] = block;
+					                        m._data["_block_b"][j] = false;
+					                    }
+					                }
+					                if(!block._data) {
+					                    m._data["_block_n"][j] = block;
+					                    m.blocks[block]._data.push(j);
+					                    m.blocks[block].size += 1;
+					                }
+					            }
+					        }
+					        prev_i = j;
+					    });
+        			    m._data.setDataValue("_i"+i,prev_i,m.size);
+    			    }    			    
+					// ё. (old) Для всех граничных точек каждого блока забрать по соседним "монадам" решения эллиптических уравнений в качестве граничных
+					var prev_m = self.mm[self.i-1];
+					m.foreach(0, function(d,i){
+					    for(var j = 0; j < m.dims; j++) {
+				            var jj = [d["_n-"+j][i], d["_n"+j][i]];
+				            for(var k = 0; k < 2; k++) {
+					            var isBorder = jj[k] === undefined;
+					            if(jj[k] !== undefined) {
+					                isBorder = d["_block_n"][jj[k]] != d["_block_n"][i];
+					            }
+					            if(isBorder) {
+					                var ind = prev_m._data["_n"+(k > 0 ? "" : "-")+j][d["_monade"][i]];
+					                if(ind !== undefined) {
+					                    var _border_fi = (d["_border_fi"]||[])[i]||[];
+					                    _border_fi.push(prev_m._data["fi"][ind]);
+					                    d.setDataValue("_border_fi",i,_border_fi);
+					                }
+                                }
+					        }
+					    }
+					});
 					// ж. Установить счётчик шагов на k
+					m.stepCounter = self.k;
 				},
 				UP:  function (){
 					var m = self._mesh();
@@ -551,7 +657,7 @@
 					// а. (old) Поместить все неграничные точки сетки в буфер
 					var buff = [];
 					m.foreach(0,function(d,i){
-						if(!d["_buff_p"][i]) {
+						if(!((d["_buff_p"]||[])[i])) {
 							var monade = d["_monade"][i];
 							var bu = buff[monade]||[];
 							var p = {};
@@ -697,7 +803,7 @@
 		}
 	};
 	
-	var mm = new MMesh(3, 2, 1e17, 0.495, function(c) {
+	var mm = new MMesh(3, 2, 1e16, 0.495, function(c) {
 	    var d = {};
 	    var r2 = 0;
 	    for(var i = 0; i < c.length; i++) {
@@ -708,7 +814,7 @@
 	    d.E = d.ro*10;
 	    return d;
 	});
-	mm._mesh().stepCounter = 0;
+	mm._mesh().stepCounter = 1;
 	do {
 		mm.doStep(mm.selectStep());
 		mm.drawStep([{canvas: null, prm: "ro"}]);					
