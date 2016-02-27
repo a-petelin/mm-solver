@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mesh Self-gravity gas problem solver (JavaScript)</title>
+</head>
+<body>
+<script src="mmsolver.js"></script>
+<script type="javascript/worker" id="meshWorker">
+var mm;
+
+function drawMesh(mesh, plane, fn) {
+	
+	function getColor(v){
+		v=Math.floor(v * 2 * 255);
+		function toRGB(v){
+			return "rgb(" + (v&0xff0000)/0x10000 + "," + (v&0xff00)/0x100 + "," + (v&0xff) + ")";
+		};
+		v = ((v > 255)?((v-255)*0x10100+0x0000ff):v*0x00001);
+		return toRGB(v);
+	}
+	function drawDot(type, d, mm, x, y, w,  h) {
+        var fill;
+		switch(type) {
+		case 'log(x)+1':
+            fill = getColor((Math.log(d+1)-Math.log(mm[0]+1))/(Math.log(mm[1]+1)-Math.log(mm[0]+1)));
+            break;
+		case 'log(x)':
+            fill = getColor((Math.log(d)-Math.log(mm[0]))/(Math.log(mm[1])-Math.log(mm[0])));
+            break;
+		case 'x':
+        default:
+            fill = getColor((d-mm[0])/(mm[1]-mm[0]));	
+            break;
+		}
+		return "<rect x='"+x+"' y='"+y+"' width='"+w+"' height='"+h+"' fill='"+fill+"'/>";
+	}
+    var svg = "<rect x='0' y='0' width='"+mesh._N[0]+"' height='"+mesh._N[0]+"' fill='green'/>";
+    var minfn = Infinity;
+    var medfn = 0;
+    var maxfn = -Infinity;
+    var fn_cnt = 0;
+    var c = 0;
+    mesh.foreach(0, function(d, i) {
+        if(d._p_cr === undefined || d._p_cr[i] > 0) {
+            if(d[fn][i] > maxfn) {
+                maxfn = d[fn][i];
+                c = (d["_c"+plane]||[])[i]||c;
+            }
+            if(d[fn][i] < minfn) {
+                minfn = d[fn][i];
+            }
+            fn_cnt++;
+            medfn+=d[fn][i];
+        }
+    });
+    medfn /= fn_cnt;
+    mesh.foreach(0, (function() {
+        var h = mesh._h;
+        var N = -Infinity;
+        for(var jj = 0; jj < mesh.dims; jj++) {
+            N = Math.max(N, mesh._N[jj]);
+        }
+        return function(d, j){
+            if(d["_buff_p"] === undefined || !d["_buff_p"][j]) {
+            if(((d["_c"+plane] === undefined)?c:d["_c"+plane][j]) == c) {
+                var i0 = (plane+1)%mesh.dims;
+                var i1 = (plane+2)%mesh.dims;
+                var c0 = d["_c"+Math.min(i0,i1)][j];
+                var c1 = d["_c"+Math.max(i0,i1)][j]||0;
+                svg += drawDot("x", d[fn][j], [minfn,maxfn,medfn], (c0/ h) + (mesh._N[0]-1)/2, (c1/ h) + (mesh._N[0]-1)/2, 1,  1);
+            }
+            }
+        };
+    })());
+    return svg;
+}
+
+onmessage = function(event) {
+    var data = event.data;
+    switch(data.method) {
+        case "load":
+            importScripts(data.href.substring(0, data.href.indexOf('mmsolver.html')) + "math-complex.js");
+            importScripts(data.href.substring(0, data.href.indexOf('mmsolver.html')) + "fft.js");
+            importScripts(data.href.substring(0, data.href.indexOf('mmsolver.html')) + "mmsolver.js");
+            break;
+        case "init":
+            mm = new MMesh(data.dims, 
+                           data.k,
+                           data.h,
+                           data.n,
+                           data.steps,
+                           data.curn,
+                           new Function(data.initf[0], data.initf[1]));
+            break;
+        case "draw":
+            var svg = drawMesh(mm._mesh(), data.plane, data.name);
+            postMessage({type: "svg", data: svg, scale: mm._mesh()._N[0]});
+            break;
+        case "step":
+            if(!mm.end) {
+                mm.doStep(mm.selectStep());
+            }
+            postMessage({type: "response", end: mm.end});
+            break;
+    }
+}
+</script>
+<script type="javascript/function" id="initFunc">
+var d = {};
+var r2 = 0;
+for(var i = 0; i < c.length; i++) {
+    d['v'+i] = 0;
+    r2 += c[i]*c[i];
+}
+d.ro = 1e-21 + (1e-22/(1+Math.pow(1e-15*Math.sqrt(r2),4)));
+d.E = d.ro*10;
+return d;
+</script>
+<script>
+    var bb = new Blob([document.querySelector('#meshWorker').textContent], {type: "application/javascript"});
+
+    // Note: window.webkitURL.createObjectURL() in Chrome 10+.
+    var worker = new Worker(window.URL.createObjectURL(bb));
+    var calc_end = false;
+    worker.onmessage = function(e) {
+        e = e.data;
+        switch(e.type) {
+        case "svg":
+            var svg = document.querySelector('#ro-map');
+            svg.innerHTML = e.data;
+            svg.setAttribute("viewBox", "0 0 " + e.scale + " " + e.scale);
+            if(!calc_end) worker.postMessage({method: "step"});
+            break;
+        case "response":
+            calc_end = e.end;
+            if(calc_end) document.querySelector('#mess').innerHTML = "END!!";
+            worker.postMessage({method: "draw", plane: 2, name: "ro"});
+            break;
+        }
+    }
+    worker.postMessage({method:"load", href: document.location.href});
+    worker.postMessage({method:"init", dims: 2, k: 2, h: 1e16, n: 3, steps: 100, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method: "draw", plane: 2, name: "ro"});
+    /*
+	do {
+		
+		mm.drawStep([{canvas: null, prm: "ro"}]);					
+	} while(!mm.end);
+	console.log(mm);
+    */
+</script>
+<svg id="ro-map" width="900" height="900" viewBox="0 0 900 900">
+<span id="mess"></span>
+</svg>
+</body>
+</html>
