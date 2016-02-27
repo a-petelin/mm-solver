@@ -62,10 +62,10 @@
 			if(j == mesh._N[0]) {
 				var arrR = new Array(j), arrI = new Array(j);
 				for (var k = 0; k < j; k++) {
-					arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*6.67e-11*d.ro_new[dat[k]];
+					arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d.ro_new[dat[k]];
 					for(var kk = 0, dd = (d["_border_fi"]||[])[dat[k]]||[]; kk < dd.length; kk++)
 					{
-						arrR[k] -= dd[kk] / (mesh._h * mesh._h);
+						//arrR[k] -= dd[kk] / (mesh._h * mesh._h);
 					}
 					arrI[k] = 0;
 				}
@@ -311,6 +311,7 @@
                     c[j] = cc[j]*h-(n-1)*h/2;
                     this._data.setDataValue("_c"+j,i,c[j]);
                 }
+                this._data.setDataValue("fi",i,0);
                 var dd = initf(c);
                 for(var prm in this._calcPrm) {
                     this._data[prm][i] = dd[prm];
@@ -454,6 +455,7 @@
                 self.blocks[i]._data.sort(function(a, b) {
                     return a - b;
                 });
+                self._data["_block_b"][self.blocks[i]._data[0]] = false;
             }
         }
     }
@@ -518,7 +520,7 @@
     						var j1 = d["_n"+j][i];
     						j_1 = (j_1 === undefined?i:j_1);
     						j1 = (j1 === undefined?i:j1);
-    						var r = (j_1==j?0:1)+(j1==j?0:1);
+                            var r = (j_1==i?0:1)+(j1==i?0:1);
 							if(r > 0) {
 								dfi[j] = (((d.fi||[])[j1]||0)-((d.fi||[])[j_1]||0))/(r*m._h);
 							} else {
@@ -530,12 +532,12 @@
 							for(var j = 0; j < m.dims; j++) {
 							    var f1,f_1;
 							    f_1 = d["_F"+prm+"_"+j+"_1"]||[];
-							    f1 = d["_F"+prm+"_"+j+"_2"]||[];
+							    f1 =  d["_F"+prm+"_"+j+"_2"]||[];
 							    f_1 = f_1[i]||0;
-							    f1 = f1[i]||0;
+							    f1 =  f1[i]||0;
 							    d_new[prm] += m.dt/m._h*(f_1 - f1);
-							    switch(prm[0]) {
-							    case "v":
+							    switch(prm) {
+							    case ("v"+j):
 							        d_new[prm] -= m.dt*d["ro"][i]*dfi[j];
 							        break;
 							    case "E":
@@ -564,8 +566,9 @@
 				        d.setDataValue("a_new",i,Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]));
 					    
 						d["_fcr"][i] = m._h/Math.sqrt(Math.PI*d.a_new[i]*d.a_new[i]/Solvers.G/d.ro_new[i]);
-						
-						var fn_cr = -Infinity;
+					});	
+					m.foreach(0, function(d,i){
+		            	var fn_cr = -Infinity;
 						for(var prm in m._critPrm) {
 							prm += "_new";
 							for(var j =0; j < m.dims; j++) {
@@ -600,31 +603,32 @@
 					// д. (new) Рассчёт потоков для гиберболических уравнений (new)
 					m.Smax = 0;
 					for(var i = 0; i < m.dims; i++) {
-					    m.foreach(i, (function(){var p_flow;
-					            return function(d,j){
-					                var j_1 = d["_n-"+i][j]
-								    var j1 = d["_n"+i][j];
-								    j_1 = (j_1 === undefined?j:j_1);
-								    j1 = (j1 === undefined?j:j1);
-								    var x={},x_1={},x1={};
-								    for(var prm in m._flowPrm) {
-								        x[prm] = d[prm+"_new"][j];
-								        x_1[prm] = d[prm+"_new"][j_1];
-								        x1[prm] = d[prm+"_new"][j1];
-								    }
-								    var flow = Solvers.RiemanSolver(x, x1, i, m.dims);
-								    if(!p_flow) {
-    							        p_flow = Solvers.RiemanSolver(x_1, x, i, m.dims);
-    							    }
-								    for(var k = 1; k < 3; k++) {
-	    							    for(var prm in m._calcPrm) {
-	    							        d.setDataValue("_F"+prm+"_"+i+"_"+k+"_new",j,p_flow["F"+prm]);
-	    							    }
-	    							    m.Smax = Math.max(m.Smax, p_flow.S);
-	    							    p_flow = flow;
-	    							}
-					            };
-					    })());
+					    m.foreach(i, (function(){
+                            var p_flow;
+                            return function(d,j){
+                                var j_1 = d["_n-"+i][j]
+                                var j1 = d["_n"+i][j];
+                                j_1 = (j_1 === undefined?j:j_1);
+                                j1 = (j1 === undefined?j:j1);
+                                var x={},x_1={},x1={};
+                                for(var prm in m._flowPrm) {
+                                    x[prm] = d[prm+"_new"][j];
+                                    x_1[prm] = d[prm+"_new"][j_1];
+                                    x1[prm] = d[prm+"_new"][j1];
+                                }
+                                var flow = Solvers.RiemanSolver(x, x1, i, m.dims);
+                                if(!p_flow) {
+                                    p_flow = Solvers.RiemanSolver(x_1, x, i, m.dims);
+                                }
+                                for(var k = 1; k < 3; k++) {
+                                    for(var prm in m._calcPrm) {
+                                        d.setDataValue("_F"+prm+"_"+i+"_"+k+"_new",j,p_flow["F"+prm]);
+                                    }
+                                    m.Smax = Math.max(m.Smax, p_flow.S);
+                                    p_flow = flow;
+                                }
+                            };
+                        })());
 					}
 					// е. Уменьшить счётчик шагов на 1
 					m.stepCounter -= 1;
@@ -800,15 +804,17 @@
 						var p = {};
 						for(var prm in m._movedParam) {
 							var cnt = 0;
-							p[prm] = 0;
-							for(var j = 0; j < cube.length; j++) {
-								var val = cube[j][prm];
-								if(val !== undefined) {
-									p[prm] += val;
-									cnt++;
-								}
-							}
-							p[prm] /= cnt;
+                            if(prm != "fi"){
+                                p[prm] = 0;
+                                for(var j = 0; j < cube.length; j++) {
+                                    var val = cube[j][prm];
+                                    if(val !== undefined) {
+                                        p[prm] += val;
+                                        cnt++;
+                                    }
+                                }
+                                p[prm] /= cnt;
+                            }
 						}
 						buff[i] = p;
 					});
@@ -834,7 +840,7 @@
 									if(nb[k] !==undefined) {
 										if(d["_is_monade"][nb[k]]) {
 											for(var prm in d) {
-												if(prm.substr(2) == "_F" && prm.substr(-1) == k+1) {
+												if(prm.substr(2) == "_F" && prm.substr(-1) == (k+1)) {
 													var nd = prm.substr(-1) % 2 + 1;
 													var fprm = prm.substr(0,prm.length() - 1)+nd;
 													d[prm][i] = d[fprm][nb[k]];

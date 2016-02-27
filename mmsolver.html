@@ -33,7 +33,7 @@ function drawMesh(mesh, plane, fn) {
             fill = getColor((d-mm[0])/(mm[1]-mm[0]));	
             break;
 		}
-		return "<rect x='"+x+"' y='"+y+"' width='"+w+"' height='"+h+"' fill='"+fill+"'/>";
+		return "<rect x='"+x+"' y='"+y+"' width='"+w+"' height='"+h+"' fill='"+fill+"'><title>"+d+"</title></rect>";
 	}
     var svg = "<rect x='0' y='0' width='"+mesh._N[0]+"' height='"+mesh._N[0]+"' fill='green'/>";
     var minfn = Infinity;
@@ -62,7 +62,7 @@ function drawMesh(mesh, plane, fn) {
             N = Math.max(N, mesh._N[jj]);
         }
         return function(d, j){
-            if(d["_buff_p"] === undefined || !d["_buff_p"][j]) {
+            if(d["_buff_p1"] === undefined || !d["_buff_p"][j]) {
             if(((d["_c"+plane] === undefined)?c:d["_c"+plane][j]) == c) {
                 var i0 = (plane+1)%mesh.dims;
                 var i1 = (plane+2)%mesh.dims;
@@ -94,14 +94,15 @@ onmessage = function(event) {
                            new Function(data.initf[0], data.initf[1]));
             break;
         case "draw":
-            var svg = drawMesh(mm._mesh(), data.plane, data.name);
-            postMessage({type: "svg", data: svg, scale: mm._mesh()._N[0]});
+            var mesh = mm.mm[data.level] || mm._mesh();
+            var svg = drawMesh(mesh, data.plane, data.name);
+            postMessage({type: "svg", data: svg, scale: mesh._N[0]});
             break;
         case "step":
             if(!mm.end) {
                 mm.doStep(mm.selectStep());
             }
-            postMessage({type: "response", end: mm.end});
+            postMessage({type: "response", end: mm.end, step: mm.prevStep, level: mm.i});
             break;
     }
 }
@@ -114,7 +115,7 @@ for(var i = 0; i < c.length; i++) {
     r2 += c[i]*c[i];
 }
 d.ro = 1e-21 + (1e-22/(1+Math.pow(1e-15*Math.sqrt(r2),4)));
-d.E = d.ro*10;
+d.E = d.ro*100;
 return d;
 </script>
 <script>
@@ -134,14 +135,19 @@ return d;
             break;
         case "response":
             calc_end = e.end;
-            if(calc_end) document.querySelector('#mess').innerHTML = "END!!";
-            worker.postMessage({method: "draw", plane: 2, name: "ro"});
+            document.querySelector('#mess').innerHTML = e.step;
+            if(calc_end) document.querySelector('#mess').innerHTML = "END!!";            
+            worker.postMessage({method: "draw", plane: 2, name: var1.value});
+            //if(e.level) worker.postMessage({method: "step"});
             break;
         }
     }
+    var n = 15;
+    var ly = 3e8*60*60*24*365;
+	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 2, h: 1e16, n: 3, steps: 100, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
-    worker.postMessage({method: "draw", plane: 2, name: "ro"});
+    worker.postMessage({method:"init", dims: 2, k: 2, h: s/n, n: n, steps: 3, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {
 		
@@ -151,7 +157,9 @@ return d;
     */
 </script>
 <svg id="ro-map" width="900" height="900" viewBox="0 0 900 900">
-<span id="mess"></span>
 </svg>
+<input type="button" onclick="worker.postMessage({method: 'step'})" value="Next"><br>
+<input id="plane" value="0"><input id="var1" value="ro"><input type="button" value="Draw" onclick="worker.postMessage({method: 'draw', plane: 2, name: var1.value, level: plane.value})">
+<br><span id="mess"></span>
 </body>
 </html>
