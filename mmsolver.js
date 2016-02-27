@@ -44,14 +44,101 @@
 -- Иначе -- переход прямо
 */
 
-(function(){
+(function(_export){
 	var kk = 0.25;
 	function Solvers() {
 	}	
 	Solvers.EllipticSolver = function(mesh) {
+		var j = 0;
+		var y = 0;
+		var dat = new Array(mesh._N[0]);
+		var W = Math.Complex(0,2*Math.PI/(Math.max.apply({},mesh._N))).exp();
+		var Wi = [];	
+		for(var i = 0; i < mesh.dims; i++) {
+			Wi.push(Math.Complex(1));
+		}
 	    mesh.foreach(0,function(d,i) {
-	        
-	    });
+			dat[j++] = i;
+			if(j == mesh._N[0]) {
+				var arrR = new Array(j), arrI = new Array(j);
+				for (var k = 0; k < j; k++) {
+					arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*6.67e-11*d.ro_new[dat[k]];
+					for(var kk = 0, dd = (d["_border_fi"]||[])[dat[k]]||[]; kk < dd.length; kk++)
+					{
+						arrR[k] -= dd[kk] / (mesh._h * mesh._h);
+					}
+					arrI[k] = 0;
+				}
+				transform(arrR, arrI);
+				for (var k = 0; k < j; k++) {
+					d.setDataValue("fft_re",dat[k],arrR[k]);
+					d.setDataValue("fft_im",dat[k],arrI[k]);
+				}
+				j = 0;
+			}
+		});
+        for(var k = 1; k < mesh.dims ; k++) {
+            j = 0;
+            dat = new Array(mesh._N[k]);
+            mesh.foreach(k, function(d, i) {
+                dat[j++] = i;
+                if(j == mesh._N[k]) {						
+                    var arrR = new Array(j), arrI = new Array(j);											
+                    for (var kk = 0; kk < j; kk++) {
+                        arrR[kk] = d.fft_re[dat[kk]];
+                        arrI[kk] = d.fft_im[dat[kk]];
+                    }
+                    transform(arrR, arrI);
+                    for (var kk = 0; kk < j; kk++) {							
+                        d.fft_re[dat[kk]] = arrR[kk];
+                        d.fft_im[dat[kk]] = arrI[kk];
+                    }
+                    j = 0;
+                }
+            });
+        }
+        mesh.foreach(0, function(d, i, ni) {
+            var denom = Math.Complex(-2*mesh.dims);
+            for(var j = 0; j < mesh.dims; j++) {
+                denom = denom.add(Wi[j]).add(Math.Complex(1).div(Wi[j]));
+            }
+            if(denom.norm() > 1e-50) {
+                d.fft_re[i] = d.fft_re[i]*mesh._h*mesh._h;//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
+                d.fft_im[i] = d.fft_im[i]*mesh._h*mesh._h;//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
+                d.fft_re[i] = (d.fft_re[i]*denom.re + d.fft_im[i]*denom.im)/(denom.re*denom.re + denom.im*denom.im);
+                d.fft_im[i] = (d.fft_im[i]*denom.re - d.fft_re[i]*denom.im)/(denom.re*denom.re + denom.im*denom.im);
+            }
+            for(var j = 0; j < mesh.dims; j++) {
+                if(ni) {
+                    if(d["_c"+j][ni] != d["_c"+j][i]) {
+                        Wi[j] = Wi[j].mul(W);
+                    }
+                }
+            }
+		});
+        for(var i = 0; i < mesh.dims ; i++) {
+            j = 0;
+            dat = new Array(mesh._N[i]);
+            mesh.foreach(i, function(d, k) {
+                dat[j++] = k;
+                if(j == mesh._N[i]) {						
+                    var arrR = new Array(j), arrI = new Array(j);											
+                    for (var kk = 0; kk < j; kk++) {
+                        arrR[kk] = d.fft_re[dat[kk]];
+                        arrI[kk] = d.fft_im[dat[kk]];
+                    }
+                    inverseTransform(arrR, arrI);
+                    for (var kk = 0; kk < j; kk++) {						
+                        d.fft_re[dat[kk]] = arrR[kk]/mesh._N[i];
+                        d.fft_im[dat[kk]] = arrI[kk]/mesh._N[i];
+                    }
+                    j = 0;
+                }
+            });
+        }
+        mesh.foreach(0, function(d, i) {
+            d.setDataValue("fi_new",i,d.fft_re[i]);
+        });
 	}
 	
 	Solvers.gm = 5/3;
@@ -128,7 +215,7 @@
 		return x;
 	}
 	
-	function Mesh(d, h, initf) {
+	function Mesh(d, h, n, initf) {
 		this.stepCounter = 0;
 		this.isCriterialPoints = false;
 		this.dims = d;
@@ -196,6 +283,7 @@
 			}
 		    return flowParam;
 		})();
+        this._critPrm = {ro:"", E:"", p:""};
 		
 		this._data = {
 		    setDataValue: function(prm, i, value) {
@@ -209,28 +297,36 @@
 		
 		this._N = [];
 		this._f = [];
-		this.size = 1;
+		this.size = Math.pow(n, this.dims);
 		
 		if(initf !== undefined) {
-			// STUB for test only
-		    var c = [];
-			for(var i=0;i<this.dims;i++) {
-				c.push(0);
-				this._N.push(1);
-				this._f.push(0);
-				this._data["_n-"+i] = [];
-				this._data["_n"+i] = [];
-				this._data["_i"+i] = [1];
-				this._data["_c"+i] = [0];
-			}
-			var dd = initf(c);
-			for(var prm in this._calcPrm) {
-				this._data[prm][0] = dd[prm];
-			}	
-			this._data.setDataValue("fi",0,-1.1);			
-			return;
-		// Конструирование полной сетки
-		    
+            // Конструирование полной сетки
+		    var c = [], cc = [];
+            for(var j = 0; j<this.dims; j++) {
+                cc.push(0);
+				this._N.push(n);
+            }
+            for(var i = 0; i < Math.pow(n, this.dims); i++) {
+                for(var j = 0; j<this.dims; j++) {
+                    c[j] = cc[j]*h-(n-1)*h/2;
+                    this._data.setDataValue("_c"+j,i,c[j]);
+                }
+                var dd = initf(c);
+                for(var prm in this._calcPrm) {
+                    this._data[prm][i] = dd[prm];
+                }
+                var d = 1, j = 0;
+                do {
+                    cc[j] += d;
+                    d = 0;
+                    if(cc[j] == n) {
+                        cc[j] = 0;
+                        d = 1;
+                        j++;
+                    }
+                }while(d!=0);
+            }
+            this.composeBlocks();
 		}
 	}
 	Mesh.prototype._moveNewToOld = function() {	
@@ -243,43 +339,162 @@
 				}
 			}
 		});
+        this.isCriterialPoints = false;
 	};
-	Mesh.prototype.foreach = function(j,f, b, c) {	
-		b= b||this._f[j];
-	    c = c||this.size;
-	    for(var i = b, k = 0; i<this.size && k < c; i = this._data["_i"+(j%this.dims)][i], k++){
+	Mesh.prototype.foreach = function(j,f) {
+	    for(var i = this._f[j]; i<this.size; i = this._data["_i"+(j%this.dims)][i]){
 		    f(this._data, i, this._data["_i"+(j%this.dims)][i]);
 	    }
-	    return i;
 	};
 	Mesh.prototype.deletePiont = function(i) {		
 		for(var p in this._data) {
 			delete this._data[p];
 		}
 	}
+	Mesh.prototype.addDataValue = function(prm, i, value) {
+		this._data.setDataValue(prm,i,value);
+	}
+    Mesh.prototype.composeBlocks = function() {
+        var jj = [], prev_i, cur_block_n;
+        var delta = 1;
+        var self = this;
+        this.blocks = [];
+        this._data[Object.keys(this._calcPrm)[0]].forEach(function(x,i){
+            var ii = i, cj = [], ci = [];
+            for(var j = 0; j < self.dims; j++) {
+                ci[j] = ii % self._N[j];
+                ii = (ii - ci[j]) / self._N[j];
+            }
+            for(var j = 1; j < self.dims; j++) {
+                var arr = jj[j-1]||[];
+                ci.push(ci.shift());
+                var cj = 0;
+                for(var k = self.dims-1; k > -1; k--) {
+                    cj *= self._N[k];
+                    cj += ci[k];
+                }
+                arr[cj] = i;
+                jj[j-1] = arr;
+            }
+            if(prev_i === undefined) {
+                self._f[0] = i;
+                self.blocks.push(new MeshBlock(self));
+                cur_block_n = 0;
+                self._data.setDataValue("_block_b",i,true);
+            } else {
+                self._data.setDataValue("_i0",prev_i,i);
+                var isNeib = (i - prev_i) == delta;
+                for(var j = 1; j < self.dims; j++) {
+                    isNeib = isNeib && (self._data["_c"+j][prev_i] == self._data["_c"+j][i]);
+                }
+                if(isNeib) {
+                    self._data.setDataValue("_n0",prev_i,i);
+                    self._data.setDataValue("_n-0",i,prev_i);
+                } else {					        
+                    self.blocks.push(new MeshBlock(self));
+                    cur_block_n++;
+                    self._data.setDataValue("_block_b",i,true);
+                }
+            }
+            self.blocks[cur_block_n]._data.push(i);
+            self.blocks[cur_block_n]._N[0] += 1;
+            self.blocks[cur_block_n].size += 1;
+            self._data.setDataValue("_block_n",i,cur_block_n);
+            prev_i = i;
+        });
+        self._data.setDataValue("_i0",prev_i,self.size);
+        for(var i = 1; i < self.dims; i++) {
+            prev_i = [][0];
+            delta *= self._N[i-1];
+            jj[i-1].forEach(function(j,x){
+                if(prev_i === undefined) {
+                    self._f[i] = j;
+                } else {
+                    self._data.setDataValue("_i"+i,prev_i,j);
+                    var isNeib = true;
+                    for(var k = 0; k < self.dims; k++) {
+                        if(k == i) {
+                            isNeib = isNeib && (j - prev_i == delta);
+                        } else {
+                            isNeib = isNeib && (self._data["_c"+k][prev_i] == self._data["_c"+k][j]);
+                        }
+                    }
+                    if(isNeib) {
+                        self._data.setDataValue("_n"+i,prev_i,j);
+                        self._data.setDataValue("_n-"+i,j,prev_i);
+                        var block = self.blocks[self._data["_block_n"][j]];
+                        if(self._data["_block_b"][j]){
+                            var prev_block = self.blocks[self._data["_block_n"][prev_i]];
+                            var isComp = true;
+                            for(var k = 0; k < self.dims; k++) {
+                                if(k != i) {
+                                    isComp = isComp && block._N[k] == prev_block._N[k];
+                                }
+                            }
+                            if(isComp) {
+                                prev_block._N[i] += 1;
+                                block = self._data["_block_n"][prev_i];
+                                self.blocks[self._data["_block_n"][j]] = block;
+                                self._data["_block_b"][j] = false;
+                            }
+                        }
+                        if(!block._data) {
+                            self._data["_block_n"][j] = block;
+                            self.blocks[block]._data.push(j);
+                            self.blocks[block].size += 1;
+                        }
+                    }
+                }
+                prev_i = j;
+            });
+            self._data.setDataValue("_i"+i,prev_i,self.size);
+        }    
+        for(var i = 0; i < self.blocks.length; i++) {
+            if(self.blocks[i]._data) {   
+                self.blocks[i]._data.sort(function(a, b) {
+                    return a - b;
+                });
+            }
+        }
+    }
 	function MeshBlock(mesh) {
 	    this._m = mesh;
 	    this.dims = mesh.dims;
 	    this._N = ("0"+new Array(this.dims).join("1")).split("").map(function(x){return 1*x;});
 	    this._data = [];
 	    this.size = 0;
+        this._h = mesh._h;
 	}
 	MeshBlock.prototype.foreach = function(i,f, b, c) {	
-	    // STUB for test only
-		f(this._m._data, this._data[0]);
-		return;
-		
+	    var delta = 1;
+        for(var j = 1; j <= i; j++) {
+            delta *= this._N[j-1];
+        }
+        var next_j;
+        for(var j = 0; j < this.size; j = next_j ) {
+            next_j = (j + delta) % this.size + Math.floor((j + delta) / this.size);
+            var next_i = this._data[next_j];
+            if(j == this.size-1) {
+                next_i = this._m.size;
+                next_j = this.size;
+            }
+            f(this._m._data, this._data[j], next_i);
+        }
+	}
+	MeshBlock.prototype.addDataValue = function(prm, i, value) {
+		this._m._data.setDataValue(prm,i,value);
 	}
 	var STEP = {
 				FORWARD: "FORWARD",
 				DOWN: "DOWN",
 				UP: "UP"
 			};
-	function MMesh(d,k,h,curn, initf) {
+	function MMesh(d,k,h,n, steps, curn, initf) {
 		this.k = k;
 		this.prevStep = STEP.FORWARD;
 		this.i = 0;
-		this.mm = [new Mesh(d,h, initf)];
+		this.mm = [new Mesh(d,h, n, initf)];
+        this.mm[0].stepCounter = steps;
 		this.mm[0].dt = 1;
 		this.end = false;
 		var self = this;
@@ -332,7 +547,7 @@
 						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Error("ro gone below zero!");	
 				        for (var k = 0 ; k < m.dims; k++) {
 					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Error("v"+k+" gone above light speed!");
-							d.setDataValue("v"+k+"_new",i, d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]);
+							d.setDataValue("v"+k+"_new",i, (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]));
 				        }
 				        if((d["E"][j] + d_new["E"]) <= 0) throw new Error("E gone below zero!");
 						d.setDataValue("E_new",i,d["E"][i] + d_new["E"]);
@@ -344,11 +559,6 @@
 		                for(var j = 0; j < m.dims; j++) {
 			                vv += d["v"+j+"_new"][i]*d["v"+j+"_new"][i];
 		                }
-		                /*
-		                var cv = d.v0[j]/Math.sqrt(vv);
-		                var sv = d.v1[j]/Math.sqrt(vv);
-		                d.vv[j] = (vv==0)?(-2*Math.PI):(Math.atan(sv/cv)+((cv<0)?(Math.sign(sv)*Math.PI):0));
-		                */
 		                if((Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Error("p gone below zero!");
 		                d.setDataValue("p_new",i,(Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2));
 				        d.setDataValue("a_new",i,Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]));
@@ -356,7 +566,7 @@
 						d["_fcr"][i] = m._h/Math.sqrt(Math.PI*d.a_new[i]*d.a_new[i]/Solvers.G/d.ro_new[i]);
 						
 						var fn_cr = -Infinity;
-						for(var prm in m._calcPrm) {
+						for(var prm in m._critPrm) {
 							prm += "_new";
 							for(var j =0; j < m.dims; j++) {
 								var j_1 = d["_n-"+j][i]
@@ -364,22 +574,23 @@
 								j_1 = (j_1 === undefined?i:j_1);
 								j1 = (j1 === undefined?i:j1);
 								var fnx_i = d[prm][j_1]+d[prm][j1];
-								fn_cr = Math.max(fn_cr, (fnx_i==0)?Math.abs(d[prm][i]):Math.abs(2*d[prm][i]/(fnx_i)-1));
+                                var _gr_eps = 1e-30;
+								fn_cr = Math.max(fn_cr, (Math.abs(fnx_i) < _gr_eps)?Math.abs(d[prm][i]):Math.abs(2*d[prm][i]/(fnx_i)-1));
 							}
 						}
 						d["_gcr"][i] = fn_cr;						
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
-					m.foreach(0, function(d,i){
-						var isBuff = (d["_buff_p"]||[])[i];
-						if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr)) {
-							var isMonade = (d["_is_monade"]||[])[i];
-							if(!isMonade) {
-								m.isCriterialPoints = true;
-								d.setDataValue("_move_down",i,1);
-							};
-						}
-					})
+                    m.foreach(0, function(d,i){
+                        var isBuff = (d["_buff_p"]||[])[i];
+                        if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr)) {
+                            var isMonade = (d["_is_monade"]||[])[i];
+                            if(!isMonade) {
+                                m.isCriterialPoints = true;
+                                d.setDataValue("_move_down",i,1);
+                            };
+                        }
+                    });
 					// г. (new) Решение эллиптических уравнений (new)
 					for(var i = 0; i < m.blocks.length; i++) {
 					    if(m.blocks[i]._data) {
@@ -450,7 +661,7 @@
 					    if(d["_move_down"][i]) {
 					        buff.addRealPoint(m,d,i);
 							d.setDataValue("_is_monade",i,true);
-					    } else if(d["_is_monade"][i]) {
+					    } else if((d["_is_monade"]||[])[i]) {
 							d["_move_down"][i] = 1;
 						}
 					});
@@ -510,8 +721,6 @@
 					    }
 					    buff[i] = cube;
 					});
-					// 0. (new) => (old)
-					m._moveNewToOld();
 					// г. Увеличить номер текущей сетки на 1
 					var dt = m.dt / self.k;
 					self.i++;
@@ -533,99 +742,7 @@
 					buff = {};
 					delete buff;
 					// е. (old) Разбить сетку на блоки
-					var jj = [], prev_i, cur_block_n;
-    			    var delta = 1;
-					m.blocks = [];
-					m._data["_monade"].forEach(function(x,i){
-						var ii = i, cj = [], ci = [];
-				        for(var j = 0; j < m.dims; j++) {
-							ci[j] = ii % m._N[j];
-							ii = (ii - ci[j]) / m._N[j];
-						}
-						for(var j = 1; j < m.dims; j++) {
-						    var arr = jj[j-1]||[];
-    						ci.push(ci.shift());
-    						var cj = 0;
-    						for(var k = m.dims-1; k > -1; k--) {
-    						    cj *= m._N[k];
-    						    cj += ci[k];
-    						}
-    						arr[cj] = i;
-    						jj[j-1] = arr;
-    					}
-					    if(prev_i === undefined) {
-					        m._f[0] = i;
-					        m.blocks.push(new MeshBlock(m));
-					        cur_block_n = 0;
-					        m._data.setDataValue("_block_b",i,true);
-					    } else {
-					        m._data.setDataValue("_i0",prev_i,i);
-					        var isNeib = (i - prev_i) == delta;
-					        for(var j = 1; j < m.dims; j++) {
-					            isNeib = isNeib && (m._data["_c"+j][prev_i] == m._data["_c"+j][i]);
-					        }
-					        if(isNeib) {
-					            m._data.setDataValue("_n0",prev_i,i);
-					            m._data.setDataValue("_n-0",i,prev_i);
-					        } else {					        
-					            m.blocks.push(new MeshBlock(m));
-					            cur_block_n++;
-    					        m._data.setDataValue("_block_b",i,true);
-					        }
-					    }
-				        m.blocks[cur_block_n]._data.push(i);
-				        m.blocks[cur_block_n]._N[0] += 1;
-				        m.blocks[cur_block_n].size += 1;
-				        m._data.setDataValue("_block_n",i,cur_block_n);
-					    prev_i = i;
-					});
-    			    m._data.setDataValue("_i0",prev_i,m.size);
-    			    for(var i = 1; i < m.dims; i++) {
-    			        prev_i = [][0];
-        			    delta *= m._N[i-1];
-    			        jj[i-1].forEach(function(j,x){
-					        if(prev_i === undefined) {
-					            m._f[i] = j;
-					        } else {
-					            m._data.setDataValue("_i"+i,prev_i,j);
-					            var isNeib = true;
-					            for(var k = 0; k < m.dims; k++) {
-					                if(k == i) {
-					                    isNeib = isNeib && (j - prev_i == delta);
-					                } else {
-    					                isNeib = isNeib && (m._data["_c"+k][prev_i] == m._data["_c"+k][j]);
-    					            }
-					            }
-					            if(isNeib) {
-					                m._data.setDataValue("_n"+i,prev_i,j);
-					                m._data.setDataValue("_n-"+i,j,prev_i);
-					                var block = m.blocks[m._data["_block_n"][j]];
-					                if(m._data["_block_b"][j]){
-    					                var prev_block = m.blocks[m._data["_block_n"][prev_i]];
-					                    var isComp = true;
-					                    for(var k = 0; k < m.dims; k++) {
-    				                        if(k != i) {
-    					                        isComp = isComp && block._N[k] == prev_block._N[k];
-    					                    }
-					                    }
-					                    if(isComp) {
-					                        prev_block._N[i] += 1;
-					                        block = m._data["_block_n"][prev_i];
-					                        m.blocks[m._data["_block_n"][j]] = block;
-					                        m._data["_block_b"][j] = false;
-					                    }
-					                }
-					                if(!block._data) {
-					                    m._data["_block_n"][j] = block;
-					                    m.blocks[block]._data.push(j);
-					                    m.blocks[block].size += 1;
-					                }
-					            }
-					        }
-					        prev_i = j;
-					    });
-        			    m._data.setDataValue("_i"+i,prev_i,m.size);
-    			    }    			    
+					m.composeBlocks();
 					// ё. (old) Для всех граничных точек каждого блока забрать по соседним "монадам" решения эллиптических уравнений в качестве граничных
 					var prev_m = self.mm[self.i-1];
 					m.foreach(0, function(d,i){
@@ -647,6 +764,8 @@
 					        }
 					    }
 					});
+					// 0. (new) => (old)
+					prev_m._moveNewToOld();
 					// ж. Установить счётчик шагов на k
 					m.stepCounter = self.k;
 				},
@@ -788,36 +907,6 @@
 			this.prevStep = step;
 		}
 	};
-	MMesh.prototype.drawStep = function(drawObjs) {
-		for(var drObj in drawObjs) {
-			switch(this.prevStep) {
-				case STEP.FORWARD:
-				// ё. (new) Отрисовать сетку
-					break;
-				case STEP.DOWN:
-				case STEP.UP:
-				// з. (old) Отрисовать сетку
-				// ё. (old) Отрисовать сетку
-					break;
-			}
-		}
-	};
-	
-	var mm = new MMesh(3, 2, 1e16, 0.495, function(c) {
-	    var d = {};
-	    var r2 = 0;
-	    for(var i = 0; i < c.length; i++) {
-	        d["v"+i] = 0;
-	        r2 += c[i]*c[i];
-	    }
-	    d.ro = 1e-21 + (1e-23/(1+Math.pow(1e-14*Math.sqrt(r2),4)));
-	    d.E = d.ro*10;
-	    return d;
-	});
-	mm._mesh().stepCounter = 1;
-	do {
-		mm.doStep(mm.selectStep());
-		mm.drawStep([{canvas: null, prm: "ro"}]);					
-	} while(!mm.end);
-	console.log(mm);
-})();
+    
+    _export.MMesh = MMesh;
+})(this);
