@@ -76,6 +76,19 @@ function drawMesh(mesh, plane, fn) {
     return svg;
 }
 
+function doStep(step) {
+    mm.doStep(step);
+    try {
+    }
+    catch(e) {
+        if(e instanceof ExecutionError) {
+            console.log(e);
+            postMessage({type: "error", step: e.step});
+        }
+    }
+    postMessage({type: "response", end: mm.end, step: mm.prevStep, level: mm.i});
+}
+
 onmessage = function(event) {
     var data = event.data;
     switch(data.method) {
@@ -98,11 +111,17 @@ onmessage = function(event) {
             var svg = drawMesh(mesh, data.plane, data.name);
             postMessage({type: "svg", data: svg, scale: mesh._N[0]});
             break;
-        case "step":
+        case "step":            
             if(!mm.end) {
-                mm.doStep(mm.selectStep());
+                doStep(mm.selectStep());
             }
-            postMessage({type: "response", end: mm.end, step: mm.prevStep, level: mm.i});
+            break;
+        case "repeat":            
+            var mesh = mm._mesh();
+            mesh.dt /= mm.k;
+            mesh.stepCounter *= mm.k;
+            mesh._dropNew();
+            doStep(data.step);
             break;
     }
 }
@@ -119,9 +138,14 @@ d.E = d.ro*100;
 return d;
 </script>
 <script>
+    function postAction(action) {
+        next.disabled = true;
+        draw.disabled = true;
+        worker.postMessage({method: action, plane: 2, name: var1.value, level: plane.value});
+    }
+    
     var bb = new Blob([document.querySelector('#meshWorker').textContent], {type: "application/javascript"});
 
-    // Note: window.webkitURL.createObjectURL() in Chrome 10+.
     var worker = new Worker(window.URL.createObjectURL(bb));
     var calc_end = false;
     worker.onmessage = function(e) {
@@ -131,6 +155,8 @@ return d;
             var svg = document.querySelector('#ro-map');
             svg.innerHTML = e.data;
             svg.setAttribute("viewBox", "0 0 " + e.scale + " " + e.scale);
+            next.disabled = false;
+            draw.disabled = false;
             if(!calc_end) worker.postMessage({method: "step"});
             break;
         case "response":
@@ -140,13 +166,19 @@ return d;
             worker.postMessage({method: "draw", plane: 2, name: var1.value});
             //if(e.level) worker.postMessage({method: "step"});
             break;
+        case "error":
+            //worker.postMessage({method: "repeat", step: e.step});
+            break;
         }
     }
-    var n = 15;
+    worker.onerror = function(e) {
+        console.log(e);
+    }
+    var n = 7;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 2, h: s/n, n: n, steps: 3, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 2, k: 2, h: s/n, n: n, steps: 64, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {
@@ -158,8 +190,8 @@ return d;
 </script>
 <svg id="ro-map" width="900" height="900" viewBox="0 0 900 900">
 </svg>
-<input type="button" onclick="worker.postMessage({method: 'step'})" value="Next"><br>
-<input id="plane" value="0"><input id="var1" value="ro"><input type="button" value="Draw" onclick="worker.postMessage({method: 'draw', plane: 2, name: var1.value, level: plane.value})">
+<input id="next" type="button" onclick="postAction('step')" value="Next"><br>
+<input id="plane" value="0"><input id="var1" value="p"><input id="draw" type="button" value="Draw" onclick="postAction('draw')">
 <br><span id="mess"></span>
 </body>
 </html>

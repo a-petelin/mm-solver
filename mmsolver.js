@@ -48,6 +48,16 @@
 	var kk = 0.25;
 	function Solvers() {
 	}	
+    Solvers.ExecutionError = function(message, step) {
+        this.name = 'ExecutionError';
+        this.message = message || 'Сообщение по умолчанию';
+        this.step = step;
+        this.stack = (new Error()).stack || "";
+        this.stack = this.name +": " +this.message + "\n" + this.stack.split("\n").splice(2).join("\n");
+    }
+    Solvers.ExecutionError.prototype = Object.create(Error.prototype);
+    Solvers.ExecutionError.prototype.constructor = Solvers.ExecutionError;
+    
 	Solvers.EllipticSolver = function(mesh) {
 		var j = 0;
 		var y = 0;
@@ -342,6 +352,17 @@
 		});
         this.isCriterialPoints = false;
 	};
+    Mesh.prototype._dropNew = function() {
+        var self = this;
+        this.foreach(0,function(d,i){
+            for(var prm in self._movedParam) {
+				if((d[prm+"_new"]||[])[i] !== undefined) {
+					delete d[prm+"_new"][i];
+				}
+			}
+        })
+        this.isCriterialPoints = false;
+    }
 	Mesh.prototype.foreach = function(j,f) {
 	    for(var i = this._f[j]; i<this.size; i = this._data["_i"+(j%this.dims)][i]){
 		    f(this._data, i, this._data["_i"+(j%this.dims)][i]);
@@ -459,6 +480,13 @@
             }
         }
     }
+    Mesh.prototype.setMoveDown = function(i) {
+        var isMonade = (this._data["_is_monade"]||[])[i];
+        if(!isMonade) {
+            this.isCriterialPoints = true;
+            this._data.setDataValue("_move_down",i,1);
+        };
+    }
 	function MeshBlock(mesh) {
 	    this._m = mesh;
 	    this.dims = mesh.dims;
@@ -546,12 +574,12 @@
 							    }
 							}
 						}
-						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Error("ro gone below zero!");	
+						if((d["ro"][i] + d_new["ro"]) <= 0) throw new Solvers.ExecutionError("ro gone below zero!", STEP.FORWARD);
 				        for (var k = 0 ; k < m.dims; k++) {
-					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Error("v"+k+" gone above light speed!");
+					        if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Solvers.ExecutionError("v"+k+" gone above light speed!", STEP.FORWARD);
 							d.setDataValue("v"+k+"_new",i, (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]));
 				        }
-				        if((d["E"][j] + d_new["E"]) <= 0) throw new Error("E gone below zero!");
+				        if((d["E"][j] + d_new["E"]) <= 0) throw new Solvers.ExecutionError("E gone below zero!", STEP.FORWARD);
 						d.setDataValue("E_new",i,d["E"][i] + d_new["E"]);
 				        d.setDataValue("ro_new",i,d["ro"][i] + d_new["ro"]);
 					});
@@ -561,7 +589,7 @@
 		                for(var j = 0; j < m.dims; j++) {
 			                vv += d["v"+j+"_new"][i]*d["v"+j+"_new"][i];
 		                }
-		                if((Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Error("p gone below zero!");
+		                if((Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Solvers.ExecutionError("p gone below zero!", STEP.FORWARD);
 		                d.setDataValue("p_new",i,(Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2));
 				        d.setDataValue("a_new",i,Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]));
 					    
@@ -584,16 +612,14 @@
 						d["_gcr"][i] = fn_cr;						
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
+                    if(self.i < 2) {
                     m.foreach(0, function(d,i){
                         var isBuff = (d["_buff_p"]||[])[i];
-                        if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr)) {
-                            var isMonade = (d["_is_monade"]||[])[i];
-                            if(!isMonade) {
-                                m.isCriterialPoints = true;
-                                d.setDataValue("_move_down",i,1);
-                            };
+                        if(!isBuff && (d["_fcr"][i] > 0.25)) {
+                            m.setMoveDown(i);
                         }
                     });
+                    }
 					// г. (new) Решение эллиптических уравнений (new)
 					for(var i = 0; i < m.blocks.length; i++) {
 					    if(m.blocks[i]._data) {
@@ -626,6 +652,9 @@
                                     }
                                     m.Smax = Math.max(m.Smax, p_flow.S);
                                     p_flow = flow;
+                                }
+                                if(j1 == j) {
+                                    p_flow = [][0];
                                 }
                             };
                         })());
@@ -915,4 +944,5 @@
 	};
     
     _export.MMesh = MMesh;
+    _export.ExecutionError = Solvers.ExecutionError;
 })(this);
