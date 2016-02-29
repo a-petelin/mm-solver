@@ -58,7 +58,7 @@
     Solvers.ExecutionError.prototype = Object.create(Error.prototype);
     Solvers.ExecutionError.prototype.constructor = Solvers.ExecutionError;
     
-	Solvers.EllipticSolver = function(mesh) {
+	Solvers.EllipticSolver = function(mesh, old) {
 		var j = 0;
 		var y = 0;
 		var dat = new Array(mesh._N[0]);
@@ -71,12 +71,24 @@
 			dat[j++] = i;
 			if(j == mesh._N[0]) {
 				var arrR = new Array(j), arrI = new Array(j);
-				for (var k = 0; k < j; k++) {
-					arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d.ro_new[dat[k]];
-					for(var kk = 0, dd = (d["_border_fi"]||[])[dat[k]]||[]; kk < dd.length; kk++)
-					{
-						//arrR[k] -= dd[kk] / (mesh._h * mesh._h);
+				for (var k = 0; k < j; k++) { 
+				    // Вместо самой функции u = 4PiGro вычисляем невязку по приближённому значению fi включающему границы
+					arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][dat[k]];
+					var LFi = -2*mesh.dims*d.getDataValue("_round_fi",i,0);
+					var bFi = d.getDataValue("_border_fi",i,[]);
+					for(var l = 0; l < mesh.dims; l++) {
+					    var jj = d.getNeibIndex(i,l);
+					    for(var ii = 0; ii < jj.length; ii++) {
+					        if(jj[ii]) {
+					            LFi += d.getDataValue("_round_fi",jj[ii],0);
+					        } else if(bFi[l]) {
+					            if(bFi[l][ii]) {
+    					            LFi += bFi[l][ii];
+					            }
+					        }
+					    }
 					}
+					arrR[k] -= LFi/(mesh._h*mesh._h);
 					arrI[k] = 0;
 				}
 				transform(arrR, arrI);
@@ -147,7 +159,8 @@
             });
         }
         mesh.foreach(0, function(d, i) {
-            d.setDataValue("fi_new",i,d.fft_re[i]);
+            // Т.к. вместо самой функции мы использовали невязку, то получили мы функцию ошибки и её надо прибавить к исходнику невязки
+            d.setDataValue("fi_new",i, d.getDataValue("_round_fi",i,0) + d.fft_re[i]);
         });
 	}
 	
@@ -299,6 +312,18 @@
 		    setDataValue: function(prm, i, value) {
 		        if(this[prm] === undefined) this[prm] = [];
 		        this[prm][i] = value;
+		    },
+		    getDataValue: function(prm, i, undefValue) {
+		        return (this[prm]||[])[i]||undefValue;
+		    },
+		    getNeibIndex: function(i, j, isReplaceI) {
+			    var j_1 = this["_n-"+j][i];
+			    var j1 = this["_n"+j][i];
+			    if(isReplaceI) {
+			        j_1 = (j_1 === undefined?i:j_1);
+			        j1 = (j1 === undefined?i:j1);		        
+			    }
+			    return [j_1,j1];
 		    }
 		};
 		for(var prm in this._movedParam) {
@@ -338,6 +363,11 @@
                 }while(d!=0);
             }
             this.composeBlocks();
+	        for(var i = 0; i < this.blocks.length; i++) {
+	            if(this.blocks[i]._data) {
+				    Solvers.EllipticSolver(this.blocks[i], true);
+				}
+	        }
 		}
 	}
 	Mesh.prototype._moveNewToOld = function() {	
@@ -612,10 +642,10 @@
 						d["_gcr"][i] = fn_cr;						
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
-                    if(self.i < 2) {
+                    if(self.i < 1) {
                     m.foreach(0, function(d,i){
                         var isBuff = (d["_buff_p"]||[])[i];
-                        if(!isBuff && (d["_fcr"][i] > 0.25)) {
+                        if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr)) {
                             m.setMoveDown(i);
                         }
                     });
@@ -776,21 +806,20 @@
 					delete buff;
 					// е. (old) Разбить сетку на блоки
 					m.composeBlocks();
-					// ё. (old) Для всех граничных точек каждого блока забрать по соседним "монадам" решения эллиптических уравнений в качестве граничных
+					// ё. (old) Для всех точек каждого блока забрать по "монадам" решения эллиптических уравнений в качестве приближённых
 					var prev_m = self.mm[self.i-1];
 					m.foreach(0, function(d,i){
+					    d.setDataValue("_round_fi", i, prev_m._data["fi"][d["_monade"][i]]);
 					    for(var j = 0; j < m.dims; j++) {
 				            var jj = [d["_n-"+j][i], d["_n"+j][i]];
 				            for(var k = 0; k < 2; k++) {
-					            var isBorder = jj[k] === undefined;
-					            if(jj[k] !== undefined) {
-					                isBorder = d["_block_n"][jj[k]] != d["_block_n"][i];
-					            }
-					            if(isBorder) {
+					            if(jj[k] === undefined) {
 					                var ind = prev_m._data["_n"+(k > 0 ? "" : "-")+j][d["_monade"][i]];
 					                if(ind !== undefined) {
 					                    var _border_fi = (d["_border_fi"]||[])[i]||[];
-					                    _border_fi.push(prev_m._data["fi"][ind]);
+					                    var _border_fi_d = _border_fi[j]||[];
+					                    _border_fi_d[k] = prev_m._data["fi"][ind];
+					                    _border_fi[j] = _border_fi_d;
 					                    d.setDataValue("_border_fi",i,_border_fi);
 					                }
                                 }
@@ -814,9 +843,9 @@
 							var bu = buff[monade]||[];
 							var p = {};
 							for(var prm in m._movedParam) {
-								if(prm.substr(2) == "_F") {
-									var d = (prm.substr(-1)=="2"?"":"-")+prm.substr(-3,1);
-									var ni = d["_n"+d][i];
+								if(prm.substr(0,2) == "_F") {
+									var dd = (prm.substr(-1)=="2"?"":"-")+prm.substr(-3,1);
+									var ni = d["_n"+dd][i];
 									if(ni === undefined || d["_monade"][ni] != monade) {
 										p[prm] = d[prm][i];
 									}
@@ -869,9 +898,9 @@
 									if(nb[k] !==undefined) {
 										if(d["_is_monade"][nb[k]]) {
 											for(var prm in d) {
-												if(prm.substr(2) == "_F" && prm.substr(-1) == (k+1)) {
+												if(prm.substr(0,2) == "_F" && prm.substr(-1) == (k+1)) {
 													var nd = prm.substr(-1) % 2 + 1;
-													var fprm = prm.substr(0,prm.length() - 1)+nd;
+													var fprm = prm.substr(0,prm.length - 1)+nd;
 													d[prm][i] = d[fprm][nb[k]];
 												}
 											}

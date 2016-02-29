@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Mesh Self-gravity gas problem solver (JavaScript)</title>
+<title>Multi mesh Self-gravity gas problem solver (JavaScript)</title>
 </head>
 <body>
 <script src="mmsolver.js"></script>
@@ -35,7 +35,7 @@ function drawMesh(mesh, plane, fn) {
 		}
 		return "<rect x='"+x+"' y='"+y+"' width='"+w+"' height='"+h+"' fill='"+fill+"'><title>"+d+"</title></rect>";
 	}
-    var svg = "<rect x='0' y='0' width='"+mesh._N[0]+"' height='"+mesh._N[0]+"' fill='green'/>";
+    var svg = "<rect x='0' y='0' width='"+mesh._N[0]+"' height='"+mesh._N[0]+"' fill='green'/"+">";
     var minfn = Infinity;
     var medfn = 0;
     var maxfn = -Infinity;
@@ -133,7 +133,7 @@ for(var i = 0; i < c.length; i++) {
     d['v'+i] = 0;
     r2 += c[i]*c[i];
 }
-d.ro = 1e-21 + (1e-22/(1+Math.pow(1e-15*Math.sqrt(r2),4)));
+d.ro = 1e-21 + (1e-20/(1+Math.pow(1e-14*Math.sqrt(r2),4)));
 d.E = d.ro*100;
 return d;
 </script>
@@ -157,7 +157,7 @@ return d;
             svg.setAttribute("viewBox", "0 0 " + e.scale + " " + e.scale);
             next.disabled = false;
             draw.disabled = false;
-            if(!calc_end) worker.postMessage({method: "step"});
+            if(!calc_end) postAction("step");
             break;
         case "response":
             calc_end = e.end;
@@ -174,11 +174,11 @@ return d;
     worker.onerror = function(e) {
         console.log(e);
     }
-    var n = 7;
+    var n = 11;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 2, h: s/n, n: n, steps: 64, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 2, k: 2, h: s/n, n: n, steps: 1/*Math.floor(64*n/9)*/, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {
@@ -191,7 +191,7 @@ return d;
 <svg id="ro-map" width="900" height="900" viewBox="0 0 900 900">
 </svg>
 <input id="next" type="button" onclick="postAction('step')" value="Next"><br>
-<input id="plane" value="0"><input id="var1" value="p"><input id="draw" type="button" value="Draw" onclick="postAction('draw')">
+<input id="plane" value="0"><input id="var1" value="ro"><input id="draw" type="button" value="Draw" onclick="postAction('draw')">
 <br><span id="mess"></span>
 </body>
 </html>
