@@ -43,15 +43,15 @@ function drawMesh(mesh, plane, fn) {
     var c = 0;
     mesh.foreach(0, function(d, i) {
         if(d._p_cr === undefined || d._p_cr[i] > 0) {
-            if(d[fn][i] > maxfn) {
-                maxfn = d[fn][i];
+            if(d.getDataValue(fn,i) > maxfn) {
+                maxfn = d.getDataValue(fn,i);
                 c = (d["_c"+plane]||[])[i]||c;
             }
-            if(d[fn][i] < minfn) {
-                minfn = d[fn][i];
+            if(d.getDataValue(fn,i) < minfn) {
+                minfn = d.getDataValue(fn,i);
             }
             fn_cnt++;
-            medfn+=d[fn][i];
+            medfn+=d.getDataValue(fn,i);
         }
     });
     medfn /= fn_cnt;
@@ -68,7 +68,7 @@ function drawMesh(mesh, plane, fn) {
                 var i1 = (plane+2)%mesh.dims;
                 var c0 = d["_c"+Math.min(i0,i1)][j];
                 var c1 = d["_c"+Math.max(i0,i1)][j]||0;
-                svg += drawDot("x", d[fn][j], [minfn,maxfn,medfn], (c0/ h) + (mesh._N[0]-1)/2, (c1/ h) + (mesh._N[0]-1)/2, 1,  1);
+                svg += drawDot("x", d.getDataValue(fn,j), [minfn,maxfn,medfn], (c0/ h) + (mesh._N[0]-1)/2, (c1/ h) + (mesh._N[0]-1)/2, 1,  1);
             }
             }
         };
@@ -77,13 +77,15 @@ function drawMesh(mesh, plane, fn) {
 }
 
 function doStep(step) {
-    mm.doStep(step);
     try {
+        mm.doStep(step);
     }
     catch(e) {
         if(e instanceof ExecutionError) {
             console.log(e);
             postMessage({type: "error", step: e.step});
+            mm.end = true;
+            mm.prevStep = e.step;
         }
     }
     postMessage({type: "response", end: mm.end, step: mm.prevStep, level: mm.i});
@@ -133,8 +135,8 @@ for(var i = 0; i < c.length; i++) {
     d['v'+i] = 0;
     r2 += c[i]*c[i];
 }
-d.ro = 1e-21 + (1e-20/(1+Math.pow(1e-14*Math.sqrt(r2),4)));
-d.E = d.ro*100;
+d.ro = 1e-21 + (1e-24/(1+Math.pow(1e-14*Math.sqrt(r2),4)));
+d.E = d.ro*10;
 return d;
 </script>
 <script>
@@ -171,14 +173,11 @@ return d;
             break;
         }
     }
-    worker.onerror = function(e) {
-        console.log(e);
-    }
-    var n = 11;
+    var n = 5;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 2, h: s/n, n: n, steps: 1/*Math.floor(64*n/9)*/, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: 20/*Math.floor(64*n/9)*/, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {

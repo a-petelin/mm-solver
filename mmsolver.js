@@ -72,23 +72,22 @@
 			if(j == mesh._N[0]) {
 				var arrR = new Array(j), arrI = new Array(j);
 				for (var k = 0; k < j; k++) { 
-				    // Вместо самой функции u = 4PiGro вычисляем невязку по приближённому значению fi включающему границы
+				    // Вместо самой функции u = 4*Pi*G*ro вычисляем невязку по приближённому значению fi включающему границы
 					arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][dat[k]];
-					var LFi = -2*mesh.dims*d.getDataValue("_round_fi",i,0);
-					var bFi = d.getDataValue("_border_fi",i,[]);
-					for(var l = 0; l < mesh.dims; l++) {
-					    var jj = d.getNeibIndex(i,l);
-					    for(var ii = 0; ii < jj.length; ii++) {
-					        if(jj[ii]) {
-					            LFi += d.getDataValue("_round_fi",jj[ii],0);
-					        } else if(bFi[l]) {
-					            if(bFi[l][ii]) {
-    					            LFi += bFi[l][ii];
-					            }
-					        }
+					var LFi = -2*mesh.dims*d.getDataValue("_round_fi",dat[k],0);
+					var bFi = d.getDataValue("_border_fi",dat[k],[]);
+					var dFi = d.getAllNeib(dat[k]);
+					var test = 0;
+					for(var i = 0; i < 2*mesh.dims; i++) {
+					    if(bFi[i] !== [][0]) {
+					        LFi += bFi[i];
+					    } else if(dFi[i] !== [][0]) {
+					        LFi += d.getDataValue("_round_fi",dFi[i],0);
 					    }
 					}
-					arrR[k] -= LFi/(mesh._h*mesh._h);
+					LFi /= mesh._h*mesh._h;
+					d.setDataValue("test",dat[k],arrR[k]-LFi);
+					arrR[k] -= LFi;
 					arrI[k] = 0;
 				}
 				transform(arrR, arrI);
@@ -160,7 +159,26 @@
         }
         mesh.foreach(0, function(d, i) {
             // Т.к. вместо самой функции мы использовали невязку, то получили мы функцию ошибки и её надо прибавить к исходнику невязки
-            d.setDataValue("fi_new",i, d.getDataValue("_round_fi",i,0) + d.fft_re[i]);
+            var fi = d.getDataValue("_round_fi",i,0) + d.fft_re[i];
+            d.setDataValue("fi_new",i, fi>0?0:fi);
+        });
+        mesh.foreach(0, function(d, i) {
+			var func = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][i];
+			var LFi = -2*mesh.dims*d.getDataValue("fi_new",i,0);
+			var bFi = d.getDataValue("_border_fi",i,[]);
+			var dFi = d.getAllNeib(i);
+			var test = 0;
+			for(var j = 0; j < 2*mesh.dims; j++) {
+			    if(bFi[j] !== [][0]) {
+			        LFi += bFi[j];
+			    } else if(dFi[j] !== [][0]) {
+			        LFi += d.getDataValue("fi_new",dFi[j],0);
+			    }
+			}
+			LFi /= mesh._h*mesh._h;
+			d.setDataValue("_func_fi",i,func);
+			d.setDataValue("_L_fi",i,LFi);
+			d.setDataValue("_r_fi",i,func - LFi);
         });
 	}
 	
@@ -314,7 +332,8 @@
 		        this[prm][i] = value;
 		    },
 		    getDataValue: function(prm, i, undefValue) {
-		        return (this[prm]||[])[i]||undefValue;
+		        var val = (this[prm]||[])[i];
+		        return val === [][0]?undefValue:val;
 		    },
 		    getNeibIndex: function(i, j, isReplaceI) {
 			    var j_1 = this["_n-"+j][i];
@@ -324,6 +343,14 @@
 			        j1 = (j1 === undefined?i:j1);		        
 			    }
 			    return [j_1,j1];
+		    },
+		    getAllNeib: function(i) {
+		        var nb = [];
+		        for(var j = 0; j < self.dims; j++) {
+		            nb.push(this["_n-"+j][i]);
+		            nb.push(this["_n"+j][i]);
+		        }
+		        return nb;
 		    }
 		};
 		for(var prm in this._movedParam) {
@@ -642,14 +669,12 @@
 						d["_gcr"][i] = fn_cr;						
 					});
 					// в. Проставить сеточный флаг "есть точки по критериям"
-                    if(self.i < 1) {
                     m.foreach(0, function(d,i){
                         var isBuff = (d["_buff_p"]||[])[i];
-                        if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > self.kcr)) {
+                        if(!isBuff && (d["_fcr"][i] > 0.25 || (d["_gcr"][i] > self.kcr && self.i < 6))) {
                             m.setMoveDown(i);
                         }
                     });
-                    }
 					// г. (new) Решение эллиптических уравнений (new)
 					for(var i = 0; i < m.blocks.length; i++) {
 					    if(m.blocks[i]._data) {
@@ -816,10 +841,8 @@
 					            if(jj[k] === undefined) {
 					                var ind = prev_m._data["_n"+(k > 0 ? "" : "-")+j][d["_monade"][i]];
 					                if(ind !== undefined) {
-					                    var _border_fi = (d["_border_fi"]||[])[i]||[];
-					                    var _border_fi_d = _border_fi[j]||[];
-					                    _border_fi_d[k] = prev_m._data["fi"][ind];
-					                    _border_fi[j] = _border_fi_d;
+					                    var _border_fi = d.getDataValue("_border_fi",i,[]);
+					                    _border_fi[j*2+k] = prev_m._data["fi"][ind];
 					                    d.setDataValue("_border_fi",i,_border_fi);
 					                }
                                 }
@@ -877,8 +900,10 @@
 						buff[i] = p;
 					});
 					// Уменьшить номер текущей сетки на 1.
+					var S = m.Smax;
 					self.i--;
 					m = self._mesh();
+					m.Smax = Math.max(m.Smax,S);
 					// д. (old) Вставить точки из буфера
 					m.foreach(0, function(d,i) {
 						if(buff[i]) {
@@ -898,7 +923,7 @@
 									if(nb[k] !==undefined) {
 										if(d["_is_monade"][nb[k]]) {
 											for(var prm in d) {
-												if(prm.substr(0,2) == "_F" && prm.substr(-1) == (k+1)) {
+												if(prm.substr(0,2) == "_F" && prm.substr(-1) == (k+1) && prm.substr(-3,1) == j) {
 													var nd = prm.substr(-1) % 2 + 1;
 													var fprm = prm.substr(0,prm.length - 1)+nd;
 													d[prm][i] = d[fprm][nb[k]];
@@ -913,7 +938,7 @@
 					// в. Удалить точки согласно g,f-критериям
 					m.foreach(0,function(d,i){
 						// ?????
-					});
+					});					
 				}
 		};
 	}
