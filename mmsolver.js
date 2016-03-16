@@ -74,7 +74,7 @@
                 var arrR = new Array(j), arrI = new Array(j);
                 for (var k = 0; k < j; k++) { 
                     // Вместо самой функции u = 4*Pi*G*ro вычисляем невязку по приближённому значению fi включающему границы
-                    arrR[k] = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][dat[k]];
+                    arrR[k] = 4*Math.PI*Solvers.G*d.getDataValue("ro" + (!old?"_new":""),dat[k],0);
                     var LFi = -2*mesh.dims*d.getDataValue("_round_fi",dat[k],0);
                     var bFi = d.getDataValue("_border_fi",dat[k],[]);
                     var dFi = d.getAllNeib(dat[k]);
@@ -105,15 +105,15 @@
             mesh.foreach(k, function(d, i) {
                 dat[j++] = i;
                 if(j == mesh._N[k]) {                        
-                    var arrR = new Array(j), arrI = new Array(j);        
+                    var arrR = new Array(j), arrI = new Array(j);
                     for (var kk = 0; kk < j; kk++) {
-                        arrR[kk] = d.fft_re[dat[kk]];
-                        arrI[kk] = d.fft_im[dat[kk]];
+                        arrR[kk] = d.getDataValue("fft_re",dat[kk]);
+                        arrI[kk] = d.getDataValue("fft_im",dat[kk]);
                     }
                     transform(arrR, arrI);
-                    for (var kk = 0; kk < j; kk++) {                            
-                        d.fft_re[dat[kk]] = arrR[kk];
-                        d.fft_im[dat[kk]] = arrI[kk];
+                    for (var kk = 0; kk < j; kk++) {
+                        d.setDataValue("fft_re",dat[k],arrR[k]);
+                        d.setDataValue("fft_im",dat[k],arrI[k]);
                     }
                     j = 0;
                 }
@@ -125,17 +125,15 @@
                 denom = denom.add(Wi[j]).add(Math.Complex(1).div(Wi[j]));
             }
             if(denom.norm() > 1e-50) {
-                d.fft_re[i] = d.fft_re[i]*mesh._h*mesh._h;//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
-                d.fft_im[i] = d.fft_im[i]*mesh._h*mesh._h;//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
-                d.fft_re[i] = (d.fft_re[i]*denom.re + d.fft_im[i]*denom.im)/(denom.re*denom.re + denom.im*denom.im);
-                d.fft_im[i] = (d.fft_im[i]*denom.re - d.fft_re[i]*denom.im)/(denom.re*denom.re + denom.im*denom.im);
+                d.setDataValue("fft_re",i,d.getDataValue("fft_re",i)*mesh._h*mesh._h);//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
+                d.setDataValue("fft_im",i,d.getDataValue("fft_im",i)*mesh._h*mesh._h);//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
+                d.setDataValue("fft_re",i,(d.getDataValue("fft_re",i)*denom.re + d.getDataValue("fft_im",i)*denom.im)/(denom.re*denom.re + denom.im*denom.im));
+                d.setDataValue("fft_im",i,(d.getDataValue("fft_im",i)*denom.re - d.getDataValue("fft_re",i)*denom.im)/(denom.re*denom.re + denom.im*denom.im));
             }
             
             for(var j = 0; j < mesh.dims; j++) {
-                if(ni) {
-                    if(d["_c"+j][ni] != d["_c"+j][i]) {
-                        Wi[j] = Wi[j].mul(W[j]);
-                    }
+                if(d["_c"+j][ni] != d["_c"+j][i]) {
+                    Wi[j] = Wi[j].mul(W[j]);
                 }
             }
         });
@@ -144,16 +142,16 @@
             dat = new Array(mesh._N[i]);
             mesh.foreach(i, function(d, k) {
                 dat[j++] = k;
-                if(j == mesh._N[i]) {                        
-                    var arrR = new Array(j), arrI = new Array(j);        
+                if(j == mesh._N[i]) {
+                    var arrR = new Array(j), arrI = new Array(j);
                     for (var kk = 0; kk < j; kk++) {
-                        arrR[kk] = d.fft_re[dat[kk]];
-                        arrI[kk] = d.fft_im[dat[kk]];
+                        arrR[kk] = d.getDataValue("fft_re",dat[kk]);
+                        arrI[kk] = d.getDataValue("fft_im",dat[kk]);
                     }
                     inverseTransform(arrR, arrI);
-                    for (var kk = 0; kk < j; kk++) {                        
-                        d.fft_re[dat[kk]] = arrR[kk]/mesh._N[i];
-                        d.fft_im[dat[kk]] = arrI[kk]/mesh._N[i];
+                    for (var kk = 0; kk < j; kk++) {
+                        d.setDataValue("fft_re",dat[k],arrR[k]/mesh._N[i]);
+                        d.setDataValue("fft_im",dat[k],arrI[k]/mesh._N[i]);
                     }
                     j = 0;
                 }
@@ -161,11 +159,11 @@
         }
         mesh.foreach(0, function(d, i) {
             // Т.к. вместо самой функции мы использовали невязку, то получили мы функцию ошибки и её надо прибавить к исходнику невязки
-            var fi = d.getDataValue("_round_fi",i,0) + d.fft_re[i];
-            d.setDataValue("fi_new",i, fi>1e10?0:fi);
+            var fi = d.getDataValue("_round_fi",i,0) + d.getDataValue("fft_re",i);
+            d.setDataValue("fi_new",i, fi>0?0:fi);
         });
         mesh.foreach(0, function(d, i) {
-            var func = Math.pow(2, mesh.dims-1)*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][i];
+            var func = 4*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][i];
             var LFi = -2*mesh.dims*d.getDataValue("fi_new",i,0);
             var bFi = d.getDataValue("_border_fi",i,[]);
             var dFi = d.getAllNeib(i);
@@ -574,6 +572,89 @@
     MeshBlock.prototype.addDataValue = function(prm, i, value) {
         this._m._data.setDataValue(prm,i,value);
     }
+    MeshBlock.prototype.expand = function(k) {
+        return this;
+    }
+    MeshBlock.prototype.expand_ = function(k) {
+        var self = this;
+        function FakeData() {
+            this.setDataValue = function(prm, i, value) {
+                if(this[i] != [][0]) {
+                    self._m._data.setDataValue(prm, i, value);
+                } else {
+                    self._m._data.setDataValue.apply(this, prm, i, value);
+                }
+            };
+            this.getDataValue = function(prm, i, undefValue) {
+                if(this[i] != [][0]) {
+                    self._m._data.getDataValue(prm, i, value);
+                } else {
+                    self._m._data.getDataValue.apply(this, prm, i, value);
+                }
+            };
+            this.getNeibIndex = self._m._data.getNeibIndex;
+            this.getAllNeib = self._m._data.getAllNeib;        
+            this.addPoint = function() {
+            }    
+        }
+        var expanded = new MeshBlock(this._m);
+        expanded._N = this._N.slice(0);
+        expanded.size = 1;
+        var dd = [];
+        for(var i = 0; i < this.dims; i++) {
+            expanded._N[i] += 2*k;
+            expanded.size *= expanded._N[i];
+            dd.push((dd[i-1]*this._N[i-1])||1);
+        }
+        expanded._data = new FakeData();        
+        
+        for(var i = 0; i < expanded.size; i++) {
+            var ii = i, jj = [], ri = 0, ci = [];
+            var real = true;
+            for(var j = 0; j < this.dims; j++) {
+                jj[j] = ii % expanded._N[j];
+                ii = (ii - jj[j]) / expanded._N[j];
+                real = real && (jj[j] - k >= 0) && (jj[j] - k < this._N[j]);
+                ri += (jj[j] - k)*dd[j];
+            }
+            if(real) {
+                expanded._data[i] = this._data[ri];
+            } else {
+                expanded._data.setDataValue("ro",i,0);
+                expanded._data.setDataValue("ro_new",i,0);
+                for(var j = 0; j<this.dims; j++) {
+                    expanded._data.setDataValue("_c"+j,i,jj[j]*this._h+dc[j]);
+                }
+            }            
+        }
+        expanded.foreach = function(i,f) {    
+            var delta = 1;
+            for(var j = 1; j <= i; j++) {
+                delta *= this._N[j-1];
+            }
+            var next_j;
+            for(var j = 0; j < this.size; j = next_j ) {
+                next_j = (j + delta) % this.size + Math.floor((j + delta) / this.size);
+                var next_i = this._data[next_j];
+                if(j == this.size-1) {
+                    next_i = this._m.size;
+                    next_j = this.size;
+                }
+                if(typeof(this._data[j]) == "number") {
+                    f(this._m._data, this._data[j], next_i);
+                } else {
+                    var d = this._data[j];     
+                    if(typeof(next_i) == "number") {
+                        d.addPoint(this._m._data, next_i);
+                    } else {
+                        d.addPoint(next_i, 0);
+                    }
+                    f(d, 0, 1);
+                }
+            }
+        }
+        return expanded;
+    }
     var STEP = {
                 FORWARD: "FORWARD",
                 DOWN: "DOWN",
@@ -658,7 +739,7 @@
                     m.foreach(0, function(d,i){
                         var fn_cr = -Infinity;
                         var L_cr = -Infinity;
-                        for(var prm in m._calcPrm) {
+                        for(var prm in m._critPrm) {
                             prm += "_new";
                             var _gr_eps = 1e-30;
                             for(var j =0; j < m.dims; j++) {
@@ -674,10 +755,10 @@
                             var g_fn_norm = 0;
                             var nbI = d.getAllNeib(i);
                             for(var j = 0; j < 2*m.dims; j++) {
-                                L_fn += d.getDataValue(prm, nbI[j], 0);
+                                L_fn += d.getDataValue(prm, nbI[j], d[prm][i]);
                                 if(j % 2) {
-                                    var fn1 = d.getDataValue(prm, nbI[j]==[][0]?i:nbI[j], 0);
-                                    var fn_1 = d.getDataValue(prm, nbI[j-1]==[][0]?i:nbI[j-1], 0);
+                                    var fn1 = d.getDataValue(prm, nbI[j], d[prm][i]);
+                                    var fn_1 = d.getDataValue(prm, nbI[j-1], d[prm][i]);
                                     var r = (nbI[j]==[][0]?0:1) + (nbI[j-1]==[][0]?0:1);
                                     g_fn_norm += Math.pow((fn1 - fn_1)/(r*m._h),2);
                                 }
@@ -691,7 +772,7 @@
                     //if(m.canDown) {
                         m.foreach(0, function(d,i){
                             var isBuff = (d["_buff_p"]||[])[i];
-                            if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i] > m.kcr)) {
+                            if(!isBuff && (d["_fcr"][i] > 0.125 || d["_gcr"][i]*0 > m.kcr)) {
                                 m.setMoveDown(i);
                             }
                         });
@@ -699,7 +780,7 @@
                     // г. (new) Решение эллиптических уравнений (new)
                     for(var i = 0; i < m.blocks.length; i++) {
                         if(m.blocks[i]._data) {
-                            Solvers.EllipticSolver(m.blocks[i]);
+                            Solvers.EllipticSolver(m.blocks[i].expand(self.k));
                         }
                     }
                     // д. (new) Рассчёт потоков для гиберболических уравнений (new)
@@ -873,7 +954,7 @@
                     // *. 
                     for(var i = 0; i < m.blocks.length; i++) {
                         if(m.blocks[i]._data) {
-                            Solvers.EllipticSolver(m.blocks[i],true);
+                            Solvers.EllipticSolver(m.blocks[i].expand(self.k),true);
                         }
                     }
                     // 0. (new) => (old)

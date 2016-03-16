@@ -131,12 +131,17 @@ onmessage = function(event) {
 <script type="javascript/function" id="initFunc">
 var d = {};
 var r2 = 0;
+var r0 = 3e16;
+var w = 2e-16;
+var ww = [-w,w,0];
+var vv = 0;
 for(var i = 0; i < c.length; i++) {
-    d['v'+i] = 0;
+    d['v'+i] = ww[i]*c[(i+1)%c.length];
+    vv += d['v'+i] * d['v'+i];
     r2 += c[i]*c[i];
 }
-d.ro = 1e-21 + (1e-24/(1+Math.pow(1e-14*Math.sqrt(r2),4)));
-d.E = d.ro*10;
+d.ro = 1e-23 + (9.9e-22/(1+Math.pow(Math.sqrt(r2)/r0,8)));
+d.E = d.ro*(10 + vv/2);
 return d;
 </script>
 <script>
@@ -173,11 +178,11 @@ return d;
             break;
         }
     }
-    var n = 5;
+    var n = 103;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: 20/*Math.floor(64*n/9)*/, curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: Math.floor(64*n/9), curn: 0.0495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {
