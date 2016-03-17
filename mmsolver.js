@@ -48,6 +48,24 @@
     var kk = 0.25;
     function Solvers() {
     }    
+    Solvers.sineTransform = function(real) {
+        // Generate complex vector with odd-symmetry
+        var tmpImag = [0];
+        var tmpReal = [0];
+        var N = 2 * real.length + 1;
+        for(var i = 0; i < real.length; i++) {
+            tmpReal[i+1] = real[i];
+            tmpReal[N-i-1] = -real[i];
+            tmpImag[i+1] = 0;
+            tmpImag[N-i-1] = 0;
+        }
+        // Perform FFT 
+        transform(tmpReal, tmpImag);
+        // Result of sine transform is imaginary part of the transformed vector
+        for(var i = 0; i < real.length; i++) {
+            real[i] = -Math.sqrt(1/N)*tmpImag[i+1];
+        }
+    }    
     Solvers.ExecutionError = function(message, step) {
         this.name = 'ExecutionError';
         this.message = message || 'Сообщение по умолчанию';
@@ -65,8 +83,8 @@
         var W = [];
         var Wi = [];
         for(var i = 0; i < mesh.dims; i++) {
-            Wi.push(Math.Complex(1));
-            W.push(Math.Complex(0,2*Math.PI/mesh._N[i]).exp());
+            W[i] = Math.Complex(0,Math.PI/(2.0*(mesh._N[i]+1))).exp();
+            Wi[i] = W[i];
         }
         mesh.foreach(0,function(d,i) {
             dat[j++] = i;
@@ -89,12 +107,10 @@
                     LFi /= mesh._h*mesh._h;
                     d.setDataValue("test",dat[k],arrR[k]-LFi);
                     arrR[k] -= LFi;
-                    arrI[k] = 0;
                 }
-                transform(arrR, arrI);
+                Solvers.sineTransform(arrR);
                 for (var k = 0; k < j; k++) {
-                    d.setDataValue("fft_re",dat[k],arrR[k]);
-                    d.setDataValue("fft_im",dat[k],arrI[k]);
+                    d.setDataValue("fst",dat[k],arrR[k]);
                 }
                 j = 0;
             }
@@ -107,32 +123,27 @@
                 if(j == mesh._N[k]) {                        
                     var arrR = new Array(j), arrI = new Array(j);
                     for (var kk = 0; kk < j; kk++) {
-                        arrR[kk] = d.getDataValue("fft_re",dat[kk]);
-                        arrI[kk] = d.getDataValue("fft_im",dat[kk]);
+                        arrR[kk] = d.getDataValue("fst",dat[kk]);
                     }
-                    transform(arrR, arrI);
+                    Solvers.sineTransform(arrR);
                     for (var kk = 0; kk < j; kk++) {
-                        d.setDataValue("fft_re",dat[k],arrR[k]);
-                        d.setDataValue("fft_im",dat[k],arrI[k]);
+                        d.setDataValue("fst",dat[kk],arrR[kk]);
                     }
                     j = 0;
                 }
             });
         }
         mesh.foreach(0, function(d, i, ni) {
-            var denom = Math.Complex(-2*mesh.dims);
+            var denom = 0;
             for(var j = 0; j < mesh.dims; j++) {
-                denom = denom.add(Wi[j]).add(Math.Complex(1).div(Wi[j]));
+                denom += -2*mesh.dims*(Wi[j].im*Wi[j].im)/(mesh._h*mesh._h);
             }
-            if(denom.norm() > 1e-50) {
-                d.setDataValue("fft_re",i,d.getDataValue("fft_re",i)*mesh._h*mesh._h);//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
-                d.setDataValue("fft_im",i,d.getDataValue("fft_im",i)*mesh._h*mesh._h);//d.fft[i].mul(mesh._h).mul(mesh._h).div(denom);
-                d.setDataValue("fft_re",i,(d.getDataValue("fft_re",i)*denom.re + d.getDataValue("fft_im",i)*denom.im)/(denom.re*denom.re + denom.im*denom.im));
-                d.setDataValue("fft_im",i,(d.getDataValue("fft_im",i)*denom.re - d.getDataValue("fft_re",i)*denom.im)/(denom.re*denom.re + denom.im*denom.im));
+            if(Math.abs(denom) > 1e-50) {
+                d.setDataValue("fst",i,d.getDataValue("fst",i)/denom);
             }
             
             for(var j = 0; j < mesh.dims; j++) {
-                if(d["_c"+j][ni] != d["_c"+j][i]) {
+                if(d.getDataValue("_c"+j,ni) != d.getDataValue("_c"+j,i)) {
                     Wi[j] = Wi[j].mul(W[j]);
                 }
             }
@@ -145,13 +156,11 @@
                 if(j == mesh._N[i]) {
                     var arrR = new Array(j), arrI = new Array(j);
                     for (var kk = 0; kk < j; kk++) {
-                        arrR[kk] = d.getDataValue("fft_re",dat[kk]);
-                        arrI[kk] = d.getDataValue("fft_im",dat[kk]);
+                        arrR[kk] = d.getDataValue("fst",dat[kk]);
                     }
-                    inverseTransform(arrR, arrI);
+                    Solvers.sineTransform(arrR);
                     for (var kk = 0; kk < j; kk++) {
-                        d.setDataValue("fft_re",dat[k],arrR[k]/mesh._N[i]);
-                        d.setDataValue("fft_im",dat[k],arrI[k]/mesh._N[i]);
+                        d.setDataValue("fst",dat[kk],arrR[kk]);
                     }
                     j = 0;
                 }
@@ -159,7 +168,7 @@
         }
         mesh.foreach(0, function(d, i) {
             // Т.к. вместо самой функции мы использовали невязку, то получили мы функцию ошибки и её надо прибавить к исходнику невязки
-            var fi = d.getDataValue("_round_fi",i,0) + d.getDataValue("fft_re",i);
+            var fi = d.getDataValue("_round_fi",i,0) + d.getDataValue("fst",i);
             d.setDataValue("fi_new",i, fi>0?0:fi);
         });
         mesh.foreach(0, function(d, i) {
@@ -572,89 +581,6 @@
     MeshBlock.prototype.addDataValue = function(prm, i, value) {
         this._m._data.setDataValue(prm,i,value);
     }
-    MeshBlock.prototype.expand = function(k) {
-        return this;
-    }
-    MeshBlock.prototype.expand_ = function(k) {
-        var self = this;
-        function FakeData() {
-            this.setDataValue = function(prm, i, value) {
-                if(this[i] != [][0]) {
-                    self._m._data.setDataValue(prm, i, value);
-                } else {
-                    self._m._data.setDataValue.apply(this, prm, i, value);
-                }
-            };
-            this.getDataValue = function(prm, i, undefValue) {
-                if(this[i] != [][0]) {
-                    self._m._data.getDataValue(prm, i, value);
-                } else {
-                    self._m._data.getDataValue.apply(this, prm, i, value);
-                }
-            };
-            this.getNeibIndex = self._m._data.getNeibIndex;
-            this.getAllNeib = self._m._data.getAllNeib;        
-            this.addPoint = function() {
-            }    
-        }
-        var expanded = new MeshBlock(this._m);
-        expanded._N = this._N.slice(0);
-        expanded.size = 1;
-        var dd = [];
-        for(var i = 0; i < this.dims; i++) {
-            expanded._N[i] += 2*k;
-            expanded.size *= expanded._N[i];
-            dd.push((dd[i-1]*this._N[i-1])||1);
-        }
-        expanded._data = new FakeData();        
-        
-        for(var i = 0; i < expanded.size; i++) {
-            var ii = i, jj = [], ri = 0, ci = [];
-            var real = true;
-            for(var j = 0; j < this.dims; j++) {
-                jj[j] = ii % expanded._N[j];
-                ii = (ii - jj[j]) / expanded._N[j];
-                real = real && (jj[j] - k >= 0) && (jj[j] - k < this._N[j]);
-                ri += (jj[j] - k)*dd[j];
-            }
-            if(real) {
-                expanded._data[i] = this._data[ri];
-            } else {
-                expanded._data.setDataValue("ro",i,0);
-                expanded._data.setDataValue("ro_new",i,0);
-                for(var j = 0; j<this.dims; j++) {
-                    expanded._data.setDataValue("_c"+j,i,jj[j]*this._h+dc[j]);
-                }
-            }            
-        }
-        expanded.foreach = function(i,f) {    
-            var delta = 1;
-            for(var j = 1; j <= i; j++) {
-                delta *= this._N[j-1];
-            }
-            var next_j;
-            for(var j = 0; j < this.size; j = next_j ) {
-                next_j = (j + delta) % this.size + Math.floor((j + delta) / this.size);
-                var next_i = this._data[next_j];
-                if(j == this.size-1) {
-                    next_i = this._m.size;
-                    next_j = this.size;
-                }
-                if(typeof(this._data[j]) == "number") {
-                    f(this._m._data, this._data[j], next_i);
-                } else {
-                    var d = this._data[j];     
-                    if(typeof(next_i) == "number") {
-                        d.addPoint(this._m._data, next_i);
-                    } else {
-                        d.addPoint(next_i, 0);
-                    }
-                    f(d, 0, 1);
-                }
-            }
-        }
-        return expanded;
-    }
     var STEP = {
                 FORWARD: "FORWARD",
                 DOWN: "DOWN",
@@ -780,7 +706,7 @@
                     // г. (new) Решение эллиптических уравнений (new)
                     for(var i = 0; i < m.blocks.length; i++) {
                         if(m.blocks[i]._data) {
-                            Solvers.EllipticSolver(m.blocks[i].expand(self.k));
+                            Solvers.EllipticSolver(m.blocks[i]);
                         }
                     }
                     // д. (new) Рассчёт потоков для гиберболических уравнений (new)
@@ -954,7 +880,7 @@
                     // *. 
                     for(var i = 0; i < m.blocks.length; i++) {
                         if(m.blocks[i]._data) {
-                            Solvers.EllipticSolver(m.blocks[i].expand(self.k),true);
+                            Solvers.EllipticSolver(m.blocks[i],true);
                         }
                     }
                     // 0. (new) => (old)
