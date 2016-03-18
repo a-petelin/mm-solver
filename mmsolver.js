@@ -77,7 +77,69 @@
     Solvers.ExecutionError.prototype = Object.create(Error.prototype);
     Solvers.ExecutionError.prototype.constructor = Solvers.ExecutionError;
     
-    Solvers.EllipticSolver = function(mesh, old) {
+    Solvers.EllipticSolver = function(m, old) {
+        // Поблочное решение эллиптических уравнений
+        for(var i = 0; i < m.blocks.length; i++) {
+            if(m.blocks[i]._data) {
+                Solvers.EllipticBlockSolver(m.blocks[i], old, "_round_fi");
+            }
+        }
+        // Расчёт полносеточной невязки для решений эллиптических уравнений
+        var maxrel_fi;
+        do {
+            maxrel_fi = -Infinity;
+            m.foreach(0, function(d, i) {
+                var func = 4*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][i];
+                var LFi = -2*m.dims*d.getDataValue("fi_new",i,0);
+                var bFi = d.getDataValue("_border_fi",i,[]);
+                var dFi = d.getAllNeib(i);
+                var test = 0;
+                for(var j = 0; j < 2*m.dims; j++) {
+                    if(dFi[j] !== [][0]) {
+                        LFi += d.getDataValue("fi_new",dFi[j],0);
+                    } else if(bFi[j] !== [][0]) {
+                        LFi += bFi[j];
+                    }
+                }
+                LFi /= m._h*m._h;
+                d.setDataValue("_func_fi",i,func);
+                d.setDataValue("_L_fi",i,LFi);
+                d.setDataValue("_r_fi",i,func - LFi);
+                d.setDataValue("_rel_fi",i,Math.abs(func - LFi)/func);
+                maxrel_fi = Math.max(maxrel_fi, Math.abs(func - LFi)/func);
+                d.setDataValue("_block_fi",i,d.getDataValue("fi_new",i,0));
+            });
+            // Поблочное уточнение решений эллиптических уравнений
+            for(var i = 0; i < m.blocks.length; i++) {
+                if(m.blocks[i]._data) {
+                    Solvers.EllipticBlockSolver(m.blocks[i], old, "_block_fi");
+                }
+            } 
+        }
+        while(maxrel_fi > 1e-1);
+        // Расчёт полносеточной невязки для решений эллиптических уравнений
+        m.foreach(0, function(d, i) {
+            var func = 4*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][i];
+            var LFi = -2*m.dims*d.getDataValue("fi_new",i,0);
+            var bFi = d.getDataValue("_border_fi",i,[]);
+            var dFi = d.getAllNeib(i);
+            var test = 0;
+            for(var j = 0; j < 2*m.dims; j++) {
+                if(dFi[j] !== [][0]) {
+                    LFi += d.getDataValue("fi_new",dFi[j],0);
+                } else if(bFi[j] !== [][0]) {
+                    LFi += bFi[j];
+                }
+            }
+            LFi /= m._h*m._h;
+            d.setDataValue("_func_fi",i,func);
+            d.setDataValue("_L_fi",i,LFi);
+            d.setDataValue("_r_fi",i,func - LFi);
+            d.setDataValue("_rel_fi",i,Math.abs(func - LFi)/func);
+            d.setDataValue("_block_fi",i,d.getDataValue("fi_new",i,0));
+        });  
+    }
+    Solvers.EllipticBlockSolver = function(mesh, old, rPrm) {
         var j = 0;
         var y = 0;
         var dat = new Array(mesh._N[0]);
@@ -98,19 +160,19 @@
                 for (var k = 0; k < j; k++) { 
                     // Вместо самой функции u = 4*Pi*G*ro вычисляем невязку по приближённому значению fi включающему границы
                     arrR[k] = 4*Math.PI*Solvers.G*d.getDataValue("ro" + (!old?"_new":""),dat[k],0);
-                    var LFi = -2*mesh.dims*d.getDataValue("_round_fi",dat[k],0);
+                    var LFi = -2*mesh.dims*d.getDataValue(rPrm,dat[k],0);
                     var bFi = d.getDataValue("_border_fi",dat[k],[]);
                     var dFi = d.getAllNeib(dat[k]);
                     var test = 0;
                     for(var i = 0; i < 2*mesh.dims; i++) {
-                        if(bFi[i] !== [][0]) {
+                        if(dFi[i] !== [][0]) {
+                            LFi += d.getDataValue(rPrm,dFi[i],0);
+                        } else if(bFi[i] !== [][0]) {
                             LFi += bFi[i];
-                        } else if(dFi[i] !== [][0]) {
-                            LFi += d.getDataValue("_round_fi",dFi[i],0);
                         }
                     }
                     LFi /= mesh._h*mesh._h;
-                    d.setDataValue("test",dat[k],arrR[k]-LFi);
+                    d.setDataValue("test",dat[k],LFi);
                     arrR[k] -= LFi;
                 }
                 Solvers.sineTransform(arrR);
@@ -182,26 +244,8 @@
         }
         mesh.foreach(0, function(d, i) {
             // Т.к. вместо самой функции мы использовали невязку, то получили мы функцию ошибки и её надо прибавить к исходнику невязки
-            var fi = d.getDataValue("_round_fi",i,0) + d.getDataValue("fst",i);
+            var fi = d.getDataValue(rPrm,i,0) + d.getDataValue("fst",i);
             d.setDataValue("fi_new",i, fi>0?0:fi);
-        });
-        mesh.foreach(0, function(d, i) {
-            var func = 4*Math.PI*Solvers.G*d["ro" + (!old?"_new":"")][i];
-            var LFi = -2*mesh.dims*d.getDataValue("fi_new",i,0);
-            var bFi = d.getDataValue("_border_fi",i,[]);
-            var dFi = d.getAllNeib(i);
-            var test = 0;
-            for(var j = 0; j < 2*mesh.dims; j++) {
-                if(bFi[j] !== [][0]) {
-                    LFi += bFi[j];
-                } else if(dFi[j] !== [][0]) {
-                    LFi += d.getDataValue("fi_new",dFi[j],0);
-                }
-            }
-            LFi /= mesh._h*mesh._h;
-            d.setDataValue("_func_fi",i,func);
-            d.setDataValue("_L_fi",i,LFi);
-            d.setDataValue("_r_fi",i,func - LFi);
         });
     }
     
@@ -413,12 +457,9 @@
                     }
                 }while(d!=0);
             }
+            // TODO: Заменить на сборку одного блока во время конструирования сетки
             this.composeBlocks();
-            for(var i = 0; i < this.blocks.length; i++) {
-                if(this.blocks[i]._data) {
-                    Solvers.EllipticSolver(this.blocks[i], true);
-                }
-            }
+            Solvers.EllipticSolver(this, true);
         }
     }
     Mesh.prototype._moveNewToOld = function() {    
@@ -712,17 +753,13 @@
                     //if(m.canDown) {
                         m.foreach(0, function(d,i){
                             var isBuff = (d["_buff_p"]||[])[i];
-                            if(!isBuff && (d["_fcr"][i] > 0.125 || d["_gcr"][i]*0 > m.kcr)) {
+                            if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i]*0 > m.kcr)) {
                                 m.setMoveDown(i);
                             }
                         });
                     //}
-                    // г. (new) Решение эллиптических уравнений (new)
-                    for(var i = 0; i < m.blocks.length; i++) {
-                        if(m.blocks[i]._data) {
-                            Solvers.EllipticSolver(m.blocks[i]);
-                        }
-                    }
+                    // г. (new) Pешение эллиптических уравнений (new)
+                    Solvers.EllipticSolver(m);
                     // д. (new) Рассчёт потоков для гиберболических уравнений (new)
                     m.Smax = 0;
                     for(var i = 0; i < m.dims; i++) {
@@ -879,7 +916,7 @@
                         d.setDataValue("_round_fi", i, prev_m._data["fi"][d["_monade"][i]]);
                         for(var j = 0; j < m.dims; j++) {
                             var jj = [d["_n-"+j][i], d["_n"+j][i]];
-                            for(var k = 0; k < 2; k++) {
+                            for(var k = 0; k < 2; k++) {                                
                                 if(jj[k] === undefined) {
                                     var ind = prev_m._data["_n"+(k > 0 ? "" : "-")+j][d["_monade"][i]];
                                     if(ind !== undefined) {
@@ -892,11 +929,7 @@
                         }
                     });
                     // *. 
-                    for(var i = 0; i < m.blocks.length; i++) {
-                        if(m.blocks[i]._data) {
-                            Solvers.EllipticSolver(m.blocks[i],true);
-                        }
-                    }
+                    Solvers.EllipticSolver(m,true);
                     // 0. (new) => (old)
                     prev_m._moveNewToOld();
                     // ж. Установить счётчик шагов на k
