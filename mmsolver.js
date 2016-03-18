@@ -52,20 +52,21 @@
         // Generate complex vector with odd-symmetry
         var tmpImag = [0];
         var tmpReal = [0];
-        var N = 2 * real.length + 1;
-        for(var i = 0; i < real.length; i++) {
-            tmpReal[i+1] = real[i];
-            tmpReal[N-i-1] = -real[i];
+        var N = 2 * real.length + 2;
+        for(var i = 0; i <= real.length; i++) {
+            tmpReal[i+1] = real[i]||0;
+            tmpReal[N-i-1] = -real[i]||0;
             tmpImag[i+1] = 0;
             tmpImag[N-i-1] = 0;
-        }
+        }        
         // Perform FFT 
         transform(tmpReal, tmpImag);
         // Result of sine transform is imaginary part of the transformed vector
         for(var i = 0; i < real.length; i++) {
             real[i] = -Math.sqrt(1/N)*tmpImag[i+1];
         }
-    }    
+    } 
+    
     Solvers.ExecutionError = function(message, step) {
         this.name = 'ExecutionError';
         this.message = message || 'Сообщение по умолчанию';
@@ -82,9 +83,13 @@
         var dat = new Array(mesh._N[0]);
         var W = [];
         var Wi = [];
+        var Sk = [];
+        var ki = [];
         for(var i = 0; i < mesh.dims; i++) {
             W[i] = Math.Complex(0,Math.PI/(2.0*(mesh._N[i]+1))).exp();
             Wi[i] = W[i];
+            ki[i] = 1;
+            Sk[i] = {"-1": Wi[i].re, "1": Wi[i].im};
         }
         mesh.foreach(0,function(d,i) {
             dat[j++] = i;
@@ -136,15 +141,24 @@
         mesh.foreach(0, function(d, i, ni) {
             var denom = 0;
             for(var j = 0; j < mesh.dims; j++) {
-                denom += -2*mesh.dims*(Wi[j].im*Wi[j].im)/(mesh._h*mesh._h);
+                denom += -2*mesh.dims*(Sk[j][ki[j]]*Sk[j][ki[j]])/(mesh._h*mesh._h);
             }
             if(Math.abs(denom) > 1e-50) {
                 d.setDataValue("fst",i,d.getDataValue("fst",i)/denom);
+            } else {
+                d.setDataValue("fst",i,0);
             }
             
             for(var j = 0; j < mesh.dims; j++) {
                 if(d.getDataValue("_c"+j,ni) != d.getDataValue("_c"+j,i)) {
                     Wi[j] = Wi[j].mul(W[j]);
+                    Sk[j] = {"-1": Wi[j].re, "1": Wi[j].im};
+                    var pj = j - 1;
+                    if(Wi[pj] != [][0]) {
+                        Wi[pj] = Wi[pj].mul(W[pj]);
+                        ki[pj] *= -1;
+                        Sk[pj] = {"-1": Wi[pj].re, "1": Wi[pj].im};
+                    }
                 }
             }
         });
