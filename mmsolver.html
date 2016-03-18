@@ -81,12 +81,13 @@ function doStep(step) {
         mm.doStep(step);
     }
     catch(e) {
+        mm.end = true;
+        console.log(e);
         if(e instanceof ExecutionError) {
-            console.log(e);
-            postMessage({type: "error", step: e.step});
-            mm.end = true;
+            postMessage({type: "error", step: e.step});    
             mm.prevStep = e.step;
         }
+        
     }
     postMessage({type: "response", end: mm.end, step: mm.prevStep, level: mm.i});
 }
@@ -132,7 +133,7 @@ onmessage = function(event) {
 var d = {};
 var r2 = 0;
 var r0 = 3e16;
-var w = 2e-16;
+var w = 7e-16;
 var ww = [-w,w,0];
 var vv = 0;
 for(var i = 0; i < c.length; i++) {
@@ -178,11 +179,11 @@ return d;
             break;
         }
     }
-    var n = 103;
+    var n = 53;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: Math.floor(64*n/9), curn: 0.0495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: Math.floor(64*n), curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {
