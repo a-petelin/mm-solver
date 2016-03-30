@@ -102,10 +102,6 @@
                     }
                 }
                 LFi /= m._h*m._h;
-                d.setDataValue("_func_fi",i,func);
-                d.setDataValue("_L_fi",i,LFi);
-                d.setDataValue("_r_fi",i,func - LFi);
-                d.setDataValue("_rel_fi",i,Math.abs(func - LFi)/func);
                 maxrel_fi = Math.max(maxrel_fi, Math.abs(func - LFi)/func);
                 d.setDataValue("_block_fi",i,d.getDataValue("fi_new",i,0));
             });
@@ -136,7 +132,6 @@
             d.setDataValue("_L_fi",i,LFi);
             d.setDataValue("_r_fi",i,func - LFi);
             d.setDataValue("_rel_fi",i,Math.abs(func - LFi)/func);
-            d.setDataValue("_block_fi",i,d.getDataValue("fi_new",i,0));
         });  
     }
     Solvers.EllipticBlockSolver = function(mesh, old, rPrm) {
@@ -249,7 +244,7 @@
         });
     }
     
-    Solvers.gm = 5/3;
+    Solvers.gm = 4/3;
     Solvers.G = 6.67e-11;
     
     Solvers.SignalSpeed = function(xL, xR, i, Pst) {
@@ -529,7 +524,7 @@
                 self._data.setDataValue("_i0",prev_i,i);
                 var isNeib = (i - prev_i) == delta;
                 for(var j = 1; j < self.dims; j++) {
-                    isNeib = isNeib && (self._data["_c"+j][prev_i] == self._data["_c"+j][i]);
+                    isNeib = isNeib && (Math.abs(self._data["_c"+j][prev_i] - self._data["_c"+j][i]) < 1e-10*self._h);
                 }
                 if(isNeib) {
                     self._data.setDataValue("_n0",prev_i,i);
@@ -560,7 +555,7 @@
                         if(k == i) {
                             isNeib = isNeib && (j - prev_i == delta);
                         } else {
-                            isNeib = isNeib && (self._data["_c"+k][prev_i] == self._data["_c"+k][j]);
+                            isNeib = isNeib && (Math.abs(self._data["_c"+k][prev_i] - self._data["_c"+k][j]) < 1e-10*self._h);
                         }
                     }
                     if(isNeib) {
@@ -573,7 +568,8 @@
                             for(var k = 0; k < self.dims; k++) {
                                 if(k != i) {
                                     isComp = isComp && block._N[k] == prev_block._N[k];
-                                }
+                                    isComp = isComp && Math.abs(self._data["_c"+k][j] - self._data["_c"+k][prev_block._data[0]]) < 1e-10*self._h;
+                                }                                
                             }
                             if(isComp) {
                                 prev_block._N[i] += 1;
@@ -665,6 +661,7 @@
                     m.foreach(0, function(d,i){
                         var d_new = {};
                         var dfi = [];
+                        var Fnorm = 0;
                         for(var j = 0; j < m.dims; j++) {
                             var j_1 = d["_n-"+j][i];
                             var j1 = d["_n"+j][i];
@@ -676,11 +673,15 @@
                             } else {
                                 dfi[j] = 0;
                             }
+                            var Fj = (d.getDataValue("p",j1,d.getDataValue("p",i)) - d.getDataValue("p",j_1,d.getDataValue("p",i)))/m._h-d["ro"][i]*dfi[j];
+                            Fnorm += Fj*Fj;
+                            d.setDataValue("_gfi"+j, i, dfi[j]);
                         }
+                        d.setDataValue("_Fnorm", i, Math.sqrt(Fnorm));
                         for(var prm in m._calcPrm) {                            
                             d_new[prm] = 0;
                             for(var j = 0; j < m.dims; j++) {
-                                var f1,f_1;
+                                var f1,f_1;                                
                                 f_1 = d["_F"+prm+"_"+j+"_1"]||[];
                                 f1 =  d["_F"+prm+"_"+j+"_2"]||[];
                                 f_1 = f_1[i]||0;
@@ -714,12 +715,14 @@
                         if((Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2) < 0) throw new Solvers.ExecutionError("p gone below zero!", STEP.FORWARD);
                         d.setDataValue("p_new",i,(Solvers.gm-1)*(d.E_new[i]-d.ro_new[i]*vv/2));
                         d.setDataValue("a_new",i,Math.sqrt(Solvers.gm*d.p_new[i]/d.ro_new[i]));
+                        d.setDataValue("T",i,d.p_new[i]/d.ro_new[i]);
                         
-                        d.setDataValue("_fcr",i, m._h/Math.sqrt(Math.PI*d.a_new[i]*d.a_new[i]/Solvers.G/d.ro_new[i]));
+                        d.setDataValue("_fcr",i, m._h/(d.a_new[i]*Math.sqrt(Math.PI/(Solvers.G*d.ro_new[i]))));
                     });
                     m.foreach(0, function(d,i){
                         var fn_cr = -Infinity;
                         var L_cr = -Infinity;
+                        var h_cr = -Infinity;
                         for(var prm in m._critPrm) {
                             prm += "_new";
                             var _gr_eps = 1e-30;
@@ -744,20 +747,18 @@
                                     g_fn_norm += Math.pow((fn1 - fn_1)/(r*m._h),2);
                                 }
                             }            
-                            L_fn = Math.abs(L_fn/m._h*m._h)/Math.pow(1+g_fn_norm, 3/2);
+                            L_fn = Math.abs(L_fn/(m._h*m._h))/Math.pow(1+g_fn_norm, 3/2);
                             d.setDataValue("_L_"+prm,i,L_fn);
                         }
                         d.setDataValue("_gcr", i, fn_cr);
                     });
                     // в. Проставить сеточный флаг "есть точки по критериям"
-                    //if(m.canDown) {
-                        m.foreach(0, function(d,i){
-                            var isBuff = (d["_buff_p"]||[])[i];
-                            if(!isBuff && (d["_fcr"][i] > 0.25 || d["_gcr"][i]*0 > m.kcr)) {
-                                m.setMoveDown(i);
-                            }
-                        });
-                    //}
+                    m.foreach(0, function(d,i){
+                        var isBuff = (d["_buff_p"]||[])[i];
+                        if(!isBuff && d["_fcr"][i] > 0.25) {
+                            m.setMoveDown(i);
+                        }
+                    });
                     // г. (new) Pешение эллиптических уравнений (new)
                     Solvers.EllipticSolver(m);
                     // д. (new) Рассчёт потоков для гиберболических уравнений (new)
@@ -850,6 +851,7 @@
                         d["_move_down"][i] = 0;
                     });
                     // в. Разбить каждую точку в буфере на куб из k^d точек.
+                    // TODO Переделать сброс потоков вниз
                     buff.forEach(function(p,i, buff){
                         var cube = [];
                         var ii = [];
@@ -911,6 +913,7 @@
                     // е. (old) Разбить сетку на блоки
                     m.composeBlocks();
                     // ё. (old) Для всех точек каждого блока забрать по "монадам" решения эллиптических уравнений в качестве приближённых
+                    // TODO Передалать на схему: решения на границе блоков => решения внутри блоков
                     var prev_m = self.mm[self.i-1];
                     m.foreach(0, function(d,i){
                         d.setDataValue("_round_fi", i, prev_m._data["fi"][d["_monade"][i]]);

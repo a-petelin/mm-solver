@@ -45,7 +45,7 @@ function drawMesh(mesh, plane, fn) {
         if(d._p_cr === undefined || d._p_cr[i] > 0) {
             if(d.getDataValue(fn,i) > maxfn) {
                 maxfn = d.getDataValue(fn,i);
-                c = (d["_c"+plane]||[])[i]||c;
+                c = d.getDataValue("_c"+plane,i,c);
             }
             if(d.getDataValue(fn,i) < minfn) {
                 minfn = d.getDataValue(fn,i);
@@ -68,7 +68,7 @@ function drawMesh(mesh, plane, fn) {
                 var i1 = (plane+2)%mesh.dims;
                 var c0 = d["_c"+Math.min(i0,i1)][j];
                 var c1 = d["_c"+Math.max(i0,i1)][j]||0;
-                svg += drawDot("x", d.getDataValue(fn,j), [minfn,maxfn,medfn], (c0/ h) + (mesh._N[0]-1)/2, (c1/ h) + (mesh._N[0]-1)/2, 1,  1);
+                svg += drawDot("x", d.getDataValue(fn,j), [minfn,maxfn,medfn], (c0/ h) + (N-1)/2, (c1/ h) + (N-1)/2, 1,  1);
             }
             }
         };
@@ -132,24 +132,25 @@ onmessage = function(event) {
 <script type="javascript/function" id="initFunc">
 var d = {};
 var r2 = 0;
-var r0 = 3e16;
-var w = 7e-16;
+var r0 = 4e16;
+var w = 5e-16;
 var ww = [-w,w,0];
+var dc = [1,-1,0];
 var vv = 0;
 for(var i = 0; i < c.length; i++) {
-    d['v'+i] = ww[i]*c[(i+1)%c.length];
+    d['v'+i] = ww[i]*c[i+dc[i]];
     vv += d['v'+i] * d['v'+i];
     r2 += c[i]*c[i];
 }
-d.ro = 1e-23 + (9.9e-22/(1+Math.pow(Math.sqrt(r2)/r0,8)));
-d.E = d.ro*(10 + vv/2);
+d.ro = 1e-22 + (9e-22/(1+Math.pow(Math.sqrt(r2)/r0,8)));
+d.E = 3e-20 + d.ro*vv/2;
 return d;
 </script>
 <script>
     function postAction(action) {
         next.disabled = true;
         draw.disabled = true;
-        worker.postMessage({method: action, plane: 2, name: var1.value, level: plane.value});
+        worker.postMessage({method: action, plane: 1, name: var1.value, level: plane.value});
     }
     
     var bb = new Blob([document.querySelector('#meshWorker').textContent], {type: "application/javascript"});
@@ -170,8 +171,12 @@ return d;
         case "response":
             calc_end = e.end;
             document.querySelector('#mess').innerHTML = e.step;
-            if(calc_end) document.querySelector('#mess').innerHTML = "END!!";            
-            worker.postMessage({method: "draw", plane: 2, name: var1.value});
+            if(calc_end) document.querySelector('#mess').innerHTML = "END!!";
+            if(e.step == "FORWARD") {            
+                worker.postMessage({method: "draw", plane: 1, name: var1.value});
+            } else {
+                postAction("step"); 
+            }
             //if(e.level) worker.postMessage({method: "step"});
             break;
         case "error":
@@ -179,11 +184,11 @@ return d;
             break;
         }
     }
-    var n = 53;
+    var n = 32;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: Math.floor(64*n), curn: 0.495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 3, k: 4, h: s/n, n: n, steps: Math.floor(640*n), curn: 0.0495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {
