@@ -133,7 +133,7 @@ onmessage = function(event) {
 var d = {};
 var r2 = 0;
 var r0 = 4e16;
-var w = 5e-16;
+var w = 1e-15;
 var ww = [-w,w,0];
 var dc = [1,-1,0];
 var vv = 0;
@@ -173,7 +173,7 @@ return d;
             document.querySelector('#mess').innerHTML = e.step;
             if(calc_end) document.querySelector('#mess').innerHTML = "END!!";
             if(e.step == "FORWARD") {            
-                worker.postMessage({method: "draw", plane: 1, name: var1.value});
+                worker.postMessage({method: "draw", plane: 2, name: var1.value});
             } else {
                 postAction("step"); 
             }
@@ -184,11 +184,11 @@ return d;
             break;
         }
     }
-    var n = 32;
+    var n = 16;
     var ly = 3e8*60*60*24*365;
 	var s = 2.1e+1*ly;
     worker.postMessage({method:"load", href: document.location.href});
-    worker.postMessage({method:"init", dims: 3, k: 4, h: s/n, n: n, steps: Math.floor(640*n), curn: 0.0495, initf: ["c", document.querySelector('#initFunc').textContent]});
+    worker.postMessage({method:"init", dims: 2, k: 4, h: s/n, n: n, steps: Math.floor(640*n), curn: 0.0495, initf: ["c", document.querySelector('#initFunc').textContent]});
     //worker.postMessage({method: "draw", plane: 2, name: "fi"});
     /*
 	do {

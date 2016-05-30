@@ -244,7 +244,7 @@
         });
     }
     
-    Solvers.gm = 4/3;
+    Solvers.gm = 5/3;
     Solvers.G = 6.67e-11;
     
     Solvers.SignalSpeed = function(xL, xR, i, Pst) {
@@ -697,11 +697,14 @@
                                 }
                             }
                         }
+                        d.setDataValue("_drodt",i,d_new["ro"]);
                         if((d["ro"][i] + d_new["ro"]) <= 0) throw new Solvers.ExecutionError("ro gone below zero!", STEP.FORWARD);
                         for (var k = 0 ; k < m.dims; k++) {
+                            d.setDataValue("_dv"+k+"dt",i,d["v"+k][i] - (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]));
                             if(Math.abs((d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"])) > 3e8) throw new Solvers.ExecutionError("v"+k+" gone above light speed!", STEP.FORWARD);
                             d.setDataValue("v"+k+"_new",i, (d["v"+k][i]*d["ro"][i] + d_new["v"+k])/(d["ro"][i] + d_new["ro"]));
                         }
+                        d.setDataValue("_dEdt",i,d_new["E"]);
                         if((d["E"][j] + d_new["E"]) <= 0) throw new Solvers.ExecutionError("E gone below zero!", STEP.FORWARD);
                         d.setDataValue("E_new",i,d["E"][i] + d_new["E"]);
                         d.setDataValue("ro_new",i,d["ro"][i] + d_new["ro"]);
@@ -868,7 +871,9 @@
                         for(var j = 0;j<Math.pow(self.k, m.dims);j++){
                             var p1 = {};
                             for(var prm in p) {
-                                p1[prm] = p[prm];
+                                if(prm.substr(0,2) != "_F") {
+                                    p1[prm] = p[prm];
+                                }
                             }
                             p1.i = 0;
                             for(var k=0;k<m.dims;k++) {
@@ -943,6 +948,7 @@
                     // 0. (new) => (old)
                     m._moveNewToOld();
                     // а. (old) Поместить все неграничные точки сетки в буфер
+                    // TODO Переделать подъём потоков
                     var buff = [];
                     m.foreach(0,function(d,i){
                         if(!((d["_buff_p"]||[])[i])) {
